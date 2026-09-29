@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Piñata Uprising: El Coloso</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!--
+    Layout copies BTD6's screen anatomy, and the load-bearing part is that
+    NOTHING carves a column out of the screen:
+      - the board fills the whole window, edge to edge, and never scrolls
+      - the shop is a panel laid OVER the terrain on the left, full height
+      - counters are pills overlaid top-left; the next round sits top-right
+      - the send button is pinned bottom-right and never moves
+      - selecting a piñata opens an upgrade window on the opposite side to the
+        shop, so the two can never overlap
+      - the only thing on the page that scrolls is the tower list
+  -->
+  <div id="menu" class="menu show">
+    <div class="menu-card">
+      <div class="menu-top">
+        <div class="menu-mark"></div>
+        <div>
+          <p class="eyebrow">Piñata tower defense</p>
+          <h1>Piñata Uprising</h1>
+          <p class="menu-goal">Fifteen waves, then <b>El Coloso</b>. Put him on the floor.</p>
+          <p class="menu-sub">They came with sticks. The piñatas were ready.</p>
+        </div>
+      </div>
+
+      <div class="menu-cols">
+        <div>
+          <p class="menu-label">Pick a hero</p>
+          <div id="menu-heroes" class="heroes"></div>
+
+          <p class="menu-label">Choose a plaza</p>
+          <div id="menu-maps" class="maps"></div>
+          <p class="menu-tag" id="menu-tag"></p>
+
+          <!-- The trophy wall moved up here when the blindfold toggle came out,
+               rather than leaving the column half empty under the boards. -->
+          <div class="menu-masks-wrap">
+            <p class="menu-label">Masks taken</p>
+            <div id="menu-masks" class="masks"></div>
+            <div id="card-pop" class="card-pop"></div>
+          </div>
+        </div>
+        <div>
+          <p class="menu-label">Pick a difficulty to begin</p>
+          <div id="menu-diffs" class="diffs"></div>
+          <button id="menu-resume" class="diff diff-resume hidden">
+            <strong>Resume</strong>
+            <span id="resume-tag">—</span>
+          </button>
+          <p class="menu-best" id="menu-best"></p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="board" id="board">
+     <!-- A 960x600 playfield in a window of any other shape leaves slack, because
+          the aspect ratio cannot be argued with. Rather than bound the board with
+          chrome or leave a void, the canvas fills the box and render.js paves the
+          surplus as the street outside the plaza — BTD6 never shows an edge. -->
+     <!-- The stage is exactly the canvas, so every overlay below is positioned
+          against the playfield rather than against any letterbox gutter. -->
+     <div class="stage">
+      <canvas id="game" width="960" height="600"></canvas>
+
+      <div class="hud">
+        <div class="hud-row">
+          <div class="pill lives">
+            <span class="ic ic-heart"></span>
+            <b id="lives">100</b>
+            <div class="lives-bar"><div id="lives-fill"></div></div>
+          </div>
+          <div class="pill money"><span class="ic ic-candy"></span><b id="money">0</b></div>
+          <div class="pill round"><span class="ic ic-round"></span><b id="wave">0 / 15</b></div>
+        </div>
+        <div class="hud-row sub">
+          <div id="wave-pips" class="wave-pips"></div>
+          <span class="where"><b id="map-label">Plaza del Sol</b> · <i id="diff-label">Plaza</i></span>
+          <small id="blind-flag" class="blind-flag hidden">blindfolded</small>
+        </div>
+
+      </div>
+
+      <!-- The round controls, top right against the shop panel: the hand that
+           picks a piñata out of the sidebar is already there. -->
+
+      <!-- Upgrade window. Floats over the board so the rail never reflows. -->
+      <aside id="sel" class="upgrade hidden">
+        <!-- The piñata itself, at its CURRENT upgrade state. All the theme art
+             lives on the board at gameplay scale, which is small; this is where
+             you actually look while deciding what to buy, so this is where it
+             has to pay off. -->
+        <div class="up-head">
+          <canvas id="sel-pic" class="up-pic" width="80" height="80"></canvas>
+          <div class="up-title">
+            <h2 id="sel-name">—</h2>
+            <span id="sel-rank"></span>
+          </div>
+        </div>
+        <div id="sel-stats" class="mini"></div>
+        <div id="sel-paths" class="paths"></div>
+        <div class="up-foot">
+          <button id="sel-target" class="ghost">Target: First</button>
+          <button id="sel-sell" class="ghost">Sell</button>
+        </div>
+      </aside>
+
+      <!-- The boss bar. The campaign is fifteen waves of road and then this: the
+           one fight the whole run is for, so it gets the top of the screen. -->
+      <div id="bossbar" class="bossbar hidden">
+        <div class="boss-top"><b id="boss-name">El Coloso</b><span id="boss-phase"></span></div>
+        <div class="boss-track"><div id="boss-fill"></div></div>
+      </div>
+
+      <div id="banner" class="banner"></div>
+
+      <div id="modal" class="modal">
+        <div class="modal-card">
+          <h2 id="modal-title">Fiesta over</h2>
+          <p id="modal-text"></p>
+          <div class="modal-actions">
+            <button id="modal-menu" class="ghost">Menu</button>
+            <button id="modal-retry" class="primary">Again</button>
+          </div>
+          <button id="modal-continue" class="primary continue hidden">Keep going — freeplay</button>
+        </div>
+      </div>
+     </div>
+    </div>
+
+    <aside class="rail">
+      <div class="rail-head">
+        <div class="brand-mark"></div>
+        <div>
+          <strong>Piñatas</strong>
+          <span>What's inside is what it shoots</span>
+        </div>
+      </div>
+
+      <!-- The round controls live IN the shop, not beside it. As a rail on the
+           board's edge they reserved 58px of playfield width, and on a portrait
+           window that is width the map cannot spare — it was most of why the map
+           looked small. Inside the panel they cost nothing: the panel's width was
+           already reserved. -->
+      <!-- What is coming, directly above the button that sends it. Reading order
+           down the rail is now: what you are about to fight, the button that
+           starts it, then what you can buy. -->
+      <div class="next">
+        <span class="next-label">Next round</span>
+        <div id="intel" class="intel"></div>
+      </div>
+
+      <div class="dock">
+        <button id="start-wave" class="round play" title="Send the round (space)">
+          <span class="tri"></span>
+          <span class="go-word">Send</span>
+        </button>
+        <button id="speed" class="round ff" title="Speed">1×</button>
+        <button id="auto" class="round ff auto" title="Send rounds automatically (A)">A</button>
+        <button id="pause" class="round ghost" title="Pause" aria-label="Pause">❙❙</button>
+        <button id="mute" class="round ghost" title="Sound" aria-label="Sound on">◂ᴴ</button>
+        <button id="quit" class="round ghost" title="Menu" aria-label="Menu">☰</button>
+        <span id="go-label" class="sr-only">Start</span>
+      </div>
+
+      <div class="shop">
+        <div id="tower-list" class="tower-list"></div>
+        <!-- Grows into whatever height the shop does not need, so a tall window
+             fills with useful information instead of a void. -->
+        <!-- Takes whatever height the shop leaves over (flex-basis 0, so it never
+             demands any) and is clipped away on a short window. The ? pill
+             promotes this same element to a centred overlay, so the copy exists
+             once. -->
+        <!-- Shares the reference panel's slot: hovering a card swaps the
+             who-is-who for that piñata's own numbers, so nothing on the panel
+             moves and the shop can be read before it is spent. -->
+        <div id="tower-detail" class="sheet detail hidden"></div>
+
+      </div>
+
+    </aside>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

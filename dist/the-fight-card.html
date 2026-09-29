@@ -1,0 +1,287 @@
+<title>The Fight Card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Spectral:ital,wght@0,300;0,400;0,600;1,300&family=JetBrains+Mono:wght@500&display=swap">
+
+<style>
+  :root {
+    /* A night plaza under strung lights. Committed to one world on purpose:
+       this is a fight poster, and a fight poster is not two things. */
+    --night:   #15101c;
+    --deeper:  #0d0913;
+    --panel:   #211830;
+    --edge:    #382a4c;
+    --paper:   #f4ecff;
+    --dim:     #a595bb;
+    --marigold:#ffc33d;   /* the piñatas' colour */
+    --mask:    #ff3d7f;   /* the luchadores' — semantic, not decorative */
+    --display: "Anton", "Arial Narrow", sans-serif;
+    --body:    "Spectral", Georgia, serif;
+    --mono:    "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--night);
+    color: var(--paper);
+    font-family: var(--body);
+    font-size: 18px;
+    line-height: 1.68;
+    font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The bunting. Drawn, not imported — a strung plaza is the whole setting. */
+  .bunting {
+    height: 26px;
+    background:
+      repeating-linear-gradient(90deg,
+        var(--marigold) 0 14px, transparent 14px 28px,
+        var(--mask) 28px 42px, transparent 42px 56px,
+        #5fd6c8 56px 70px, transparent 70px 84px,
+        #b083f5 84px 98px, transparent 98px 112px);
+    -webkit-mask-image: linear-gradient(180deg, #000 0 6px, transparent 6px),
+      repeating-linear-gradient(90deg, #000 0 14px, transparent 14px 28px);
+    mask-image: linear-gradient(180deg, #000 0 6px, transparent 6px),
+      repeating-linear-gradient(90deg, #000 0 14px, transparent 14px 28px);
+    clip-path: polygon(0 0, 100% 0, 100% 22%, 0 22%);
+    border-bottom: 2px solid var(--edge);
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 44px 24px 96px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--marigold); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--display); font-weight: 400;
+    font-size: clamp(46px, 12vw, 104px); line-height: 0.86;
+    letter-spacing: 0.005em; text-transform: uppercase;
+    margin: 0 0 6px; text-wrap: balance;
+  }
+  h1 em { font-style: normal; display: block; color: var(--marigold); }
+  .where {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--dim);
+    margin: 18px 0 0; padding-top: 18px; border-top: 2px solid var(--edge);
+  }
+
+  .lede { font-size: 21px; font-style: italic; color: var(--paper); margin: 34px 0 0; }
+
+  /* One entry per real wave. The numbering is the game's own — sixteen rounds,
+     the last one El Coloso — so it encodes something true rather than
+     decorating the page with digits. */
+  .round { margin: 54px 0 0; }
+  .round-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .no {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em;
+    color: var(--mask); white-space: nowrap;
+  }
+  .rule { flex: 1; height: 2px; background: var(--edge); }
+  h2 {
+    font-family: var(--display); font-weight: 400;
+    font-size: clamp(27px, 5.4vw, 38px); line-height: 1.02;
+    letter-spacing: 0.01em; text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+  .round p { margin: 0 0 16px; }
+  .round p:last-child { margin-bottom: 0; }
+  strong { font-weight: 600; color: var(--marigold); }
+  .foe { font-weight: 600; color: var(--mask); font-style: normal; }
+
+  blockquote {
+    margin: 22px 0; padding: 4px 0 4px 20px;
+    border-left: 3px solid var(--marigold);
+    font-size: 20px; font-style: italic; color: var(--paper);
+  }
+
+  .card-strip {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--edge);
+  }
+  .tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid var(--edge); border-radius: 99px;
+    padding: 4px 11px; color: var(--dim);
+  }
+  .tag.p { border-color: rgba(255,195,61,0.5); color: var(--marigold); }
+  .tag.l { border-color: rgba(255,61,127,0.5); color: var(--mask); }
+
+  .final { border: 2px solid var(--mask); border-radius: 4px; padding: 26px 26px 28px; background: var(--panel); }
+  .final h2 { color: var(--mask); }
+
+  .closer {
+    margin: 64px 0 0; padding-top: 30px; border-top: 2px solid var(--edge);
+    font-size: 20px; font-style: italic; color: var(--dim);
+  }
+  .closer strong { font-style: normal; }
+</style>
+
+<div class="bunting"></div>
+
+<div class="wrap">
+  <p class="eyebrow">Piñata Uprising &middot; the fight card</p>
+  <h1>They came<br>with sticks<em>we were ready</em></h1>
+  <p class="where">Plaza del Sol &middot; sixteen rounds &middot; no blindfolds this year</p>
+
+  <p class="lede">For as long as anyone had bothered to remember, the arrangement
+    was this. The piñatas hung. The people swung. The piñatas burst, and everyone
+    went home with their pockets full.</p>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Before the bell</span><span class="rule"></span></div>
+    <h2>Nobody asks a piñata anything</h2>
+    <p>Nobody had asked the piñatas. That is not a complaint, it is a description
+      — nobody asks a piñata anything. You buy one, you hang one, you hit one.
+      There is no part of the arrangement where the piñata speaks.</p>
+    <p>So the rope went up over the plaza the way it went up every January, and
+      the <strong>Candy piñata</strong> rode it into the air over the fountain,
+      turning slowly, looking down at the crowd, at the sticks, at the folded
+      cloths they use for the eyes.</p>
+    <p>And it thought, very clearly, for the first time in the history of
+      papier-mâché: <em>no.</em></p>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 01</span><span class="rule"></span></div>
+    <h2>The children go first</h2>
+    <p>They always send the children first. Not out of strategy — out of custom.
+      The <span class="foe">Niños</span> came across the tiles in a loose,
+      delighted line, sticks held wrong, running because running is what you do
+      when you are seven and there is sugar at the end of it.</p>
+    <p>The Candy piñata did not want to hurt anybody. It sprayed a handful of hard
+      sweets across the paving at ankle height, which is not a weapon so much as
+      an opinion, and the first Niño sat down hard on the stones and started to
+      laugh.</p>
+    <p>By the fourth one, nobody in the plaza was laughing.</p>
+    <div class="card-strip">
+      <span class="tag p">Candy piñata</span><span class="tag l">Niño &times;6</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 03</span><span class="rule"></span></div>
+    <h2>The cape</h2>
+    <p>The <span class="foe">Matador</span> came alone, and he came slowly, and he
+      brought the cape.</p>
+    <p>Everything the piñatas threw at him, he let past. The cape does not block —
+      it invites. You swing where the red is and the red is not where the man is,
+      and the crowd says <em>olé</em>, and the crowd said it now, because a crowd
+      will say it for anybody.</p>
+    <p>It was the <strong>Firecracker piñata</strong> that settled him, and it
+      settled him by not aiming at all. You cannot sidestep a bang. The cape came
+      down over his shoulders like a dropped tablecloth and stayed there.</p>
+    <blockquote>A cape answers a shot. It has nothing at all to say to a splash.</blockquote>
+    <div class="card-strip">
+      <span class="tag p">Firecracker piñata</span><span class="tag l">Matador</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 05</span><span class="rule"></span></div>
+    <h2>What the Coin piñata said</h2>
+    <p>Halfway through the fifth round the <strong>Coin piñata</strong> — which had
+      not thrown a single thing at a single person, and had no intention of
+      starting — pointed out that the plaza was going to lose.</p>
+    <p>Not tonight. Tonight was fine. But the rope only holds so many, and every
+      piñata that goes up is one that has to be paid for, and the ones that pay
+      for themselves are the ones you hang <em>first</em>, before you need them,
+      while it still feels like a waste.</p>
+    <p>The Chili piñata, which was on fire and enjoying it, said that this was a
+      terrible speech. The Coin piñata said that terrible speeches are usually
+      the correct ones, and went back to compounding.</p>
+    <div class="card-strip">
+      <span class="tag p">Coin piñata</span><span class="tag p">Chili piñata</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 08</span><span class="rule"></span></div>
+    <h2>The bull does not slow down</h2>
+    <p>The <strong>Gum piñata</strong> had spent eight rounds being the most useful
+      thing in the plaza and getting no credit for it, which is the standing
+      condition of anything that makes other people better at their jobs. It
+      gummed the tiles. Things arrived late. Everything else got an extra swing.</p>
+    <p>Then the <span class="foe">Toro</span> came through the arch at the far end,
+      and the Gum piñata laid down its best work directly in its path, and the
+      Toro went through it at exactly the speed it had been going before.</p>
+    <p>Some things you slow. Some things you stop. Knowing which is which is
+      most of what the plaza learned that night, and it learned it late.</p>
+    <div class="card-strip">
+      <span class="tag p">Gum piñata</span><span class="tag p">Maraca piñata</span><span class="tag l">Toro</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 11</span><span class="rule"></span></div>
+    <h2>Foil</h2>
+    <p>The <span class="foe">Plateado</span> wore a silver mask, and the silver was
+      not for show.</p>
+    <p>The Chili piñata hit him with everything it had, which was fire, and had
+      always been fire, and had never once needed to be anything else. The fire
+      went over the foil and off the foil and out.</p>
+    <p>It was the <strong>Sparkler piñata</strong> that did it in the end — one
+      reach the whole width of the plaza, one hit, and a long wait before the
+      next one. Nobody enjoyed it much. There is no <em>olé</em> for arithmetic.</p>
+    <div class="card-strip">
+      <span class="tag p">Sparkler piñata</span><span class="tag l">Plateado</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 13</span><span class="rule"></span></div>
+    <h2>The trio plays anyway</h2>
+    <p>The <strong>Mariachi trio</strong> hit nothing all night. Not one luchador,
+      not once, not by accident. Three of them on one rope, playing.</p>
+    <p>And every piñata within earshot swung faster than it had any business
+      swinging, and the Papel picado strung above the arch cut cleaner, and the
+      Ribbon dancer's streamer went one luchador further down the line than it
+      should have reached.</p>
+    <p>When they write it up they will say the Sparkler won round thirteen. The
+      Sparkler will not correct them. The Sparkler was listening to the music
+      like everybody else.</p>
+    <div class="card-strip">
+      <span class="tag p">Mariachi trio</span><span class="tag p">Ribbon dancer</span><span class="tag p">Papel picado</span>
+    </div>
+  </div>
+
+  <div class="round">
+    <div class="round-head"><span class="no">Round 15</span><span class="rule"></span></div>
+    <h2>El Campeón</h2>
+    <p>He had a belt, and he had earned it somewhere, and he walked up the middle
+      of the plaza without hurrying because the whole point of a champion is that
+      he does not have to hurry.</p>
+    <p>It took the entire plaza. Every rope, every piñata, the fire and the reach
+      and the rattle and the gum, and the trio playing so hard the strings went.</p>
+    <p>He went down by the fountain. The plaza had eleven lives left and no idea
+      that the night was not over.</p>
+    <div class="card-strip">
+      <span class="tag l">El Campeón</span>
+    </div>
+  </div>
+
+  <div class="round final">
+    <div class="round-head"><span class="no">Round 16 &middot; final</span><span class="rule"></span></div>
+    <h2>El Coloso</h2>
+    <p>You hear him before the arch. Not footsteps — the bunting. Every flag on
+      every line in the plaza turning to face the same way at once.</p>
+    <p><span class="foe">El Coloso</span> does not carry a stick. El Coloso is the
+      reason there are sticks. He came in under the arch sideways because he did
+      not fit through it the ordinary way, and the first thing he did was take
+      hold of the rope.</p>
+    <p>He breaks twice on the way to the fountain. Each time, what stands up is
+      smaller, and faster, and considerably less interested in the arrangement.</p>
+    <blockquote>Fifteen rounds are the road. This is the thing the road was for.</blockquote>
+    <p>Whether he reaches the fountain is not written here. That part is yours.</p>
+    <div class="card-strip">
+      <span class="tag l">El Coloso &middot; three phases</span>
+    </div>
+  </div>
+
+  <p class="closer">There is a new arrangement in Plaza del Sol now, and it is
+    shorter than the old one. <strong>The rope goes up. The piñatas hang. And if
+    you want what is inside one, you may ask.</strong></p>
+</div>

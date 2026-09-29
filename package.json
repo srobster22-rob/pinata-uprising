@@ -1,0 +1,10 @@
+{
+  "name": "pinata-uprising",
+  "version": "0.1.0",
+  "description": "Tower defense where the piñatas fight back",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/",
+    "serve": "npx -y http-server . -p 8140 -c-1 --silent"
+  }
+}

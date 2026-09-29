@@ -1,0 +1,1261 @@
+/*
+  One screen, never scrolls.
+
+  The shape of this file follows BTD6's screen anatomy, and the load-bearing part
+  is that NOTHING carves a column out of the screen: the board is the whole
+  window, and the shop, the counters, the next-round card, the send button and the
+  upgrade window are all panels laid over it. A rail that takes a column shrinks
+  the playfield exactly on the window shapes where the playfield is already the
+  scarce thing — which is what two earlier arrangements here got wrong.
+
+  main.js sets --shopw and sizes the canvas to the whole window; render.js keeps
+  the plaza clear of the panel and paves everything else as street.
+*/
+
+:root {
+  --ink: #22384a;
+  --paper: #fdf6e8;
+  /* The shop was near-white against a board of warm plaza and deep street, which
+     read as a browser dialog parked on top of a game. It is the game's own dark
+     tone now — the same family as the veil and the page behind it — with cream
+     type and gold accents, so it reads as part of the same picture. */
+  --panel: #2b2038;
+  --panel-line: #4a3560;
+  --panel-ink: #f6ecff;
+  --edge: #e2cfae;
+  --hot: #e8524f;
+  --sun: #f2c53d;
+  --lime: #7ec850;
+  --sky: #3fc4c9;
+  --rose: #f2789b;
+  --shadow: 0 4px 0 var(--ink);
+  --shopw: 200px;
+  --boardmid: 50%;
+  --dock-top: 110px;
+  --boss-top: 210px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: "Baloo 2", system-ui, sans-serif;
+  background: #2f2140;
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(242, 120, 155, 0.22), transparent 42%),
+    radial-gradient(circle at 88% 76%, rgba(63, 196, 201, 0.2), transparent 44%);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+/* Nothing carves a column out of the screen. The board is the whole window and
+   every panel is laid over it — which is the part of BTD's anatomy this game kept
+   getting wrong: a rail that takes a column shrinks the playfield on exactly the
+   window shapes where the playfield is already the scarce thing. */
+/**
+ * THE STAGE, and it is landscape.
+ *
+ * The game used to fill whatever shape the window was. On a portrait window that
+ * is a bad deal twice over: the playfield is a fixed 8:5, so a tall window turns
+ * almost all of its height into street, AND the shop and control rail take their
+ * width out of the little that is left — measured at 520x900 the board came out
+ * smaller than it does at 800x540.
+ *
+ * So the game plays in a 16:10 box, centred, and the window's leftover is margin
+ * rather than a stretched layout. Everything inside is positioned against this
+ * element, not the viewport, so the shop, the rail and the upgrade window all
+ * follow it.
+ */
+.app {
+  position: relative;
+  overflow: hidden;
+  /* Full width always; the height is capped so the stage can never be TALLER
+     than 1.45:1. A hard 16:10 box was the wrong trade in the other direction —
+     on a 2514x1269 window it letterboxed 484px of perfectly good width away and
+     the board came out smaller than before. Landscape windows lose nothing;
+     portrait ones letterbox, which is the whole point. */
+  width: 100vw;
+  height: min(100vh, calc(100vw / 1.45));
+  box-shadow: 0 0 0 3px var(--ink), 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* The stage is centred in the window, and the surround is the page's own ground
+   rather than more terrain — the board already draws its own street. */
+body { display: grid; place-items: center; }
+
+/* ---------------------------------------------------------------- the board */
+
+.board { position: absolute; inset: 0; }
+.stage { position: absolute; inset: 0; }
+#game { display: block; width: 100%; height: 100%; }
+
+/* One pip per scripted round: the run's shape at a glance, BTD6's round counter
+   made visible instead of a fraction you have to read. */
+.wave-pips { display: flex; gap: 3px; }
+.wave-pips i {
+  width: 11px; height: 13px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: rgba(253, 246, 232, 0.75);
+}
+.wave-pips i.done { background: var(--lime); }
+.wave-pips i.now { background: var(--sun); box-shadow: inset 0 0 0 2px #fff; }
+.wave-pips i.boss { border-radius: 4px 4px 7px 7px; }
+.wave-pips i.boss.done { background: var(--hot); }
+.wave-pips i.free { background: var(--sky); }
+
+#game {
+  display: block;
+  image-rendering: pixelated;
+  /* No frame: the canvas is the window now, and an ink border around the whole
+     screen reads as a box the game is sitting in. */
+  cursor: crosshair;
+}
+
+/* ------------------------------------------------------- overlaid counters */
+
+.hud {
+  position: absolute;
+  left: 14px; top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  max-width: calc(100% - var(--shopw) - 28px);
+  pointer-events: auto;
+}
+.hud-row { display: flex; align-items: center; gap: 8px; }
+.hud-row.sub {
+  background: rgba(43, 32, 56, 0.66);
+  border-radius: 99px;
+  padding: 3px 11px 3px 9px;
+}
+.hud-row.sub .where { font-size: 12px; font-weight: 800; color: #fdf6e8; opacity: 0.85; margin-left: 4px; }
+.hud-row.sub .where i { font-style: normal; text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; opacity: 0.8; }
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(253, 246, 232, 0.95);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 3px 0 var(--ink);
+  padding: 5px 13px;
+}
+.pill b { font-size: 23px; font-weight: 800; line-height: 1.05; }
+
+/* Marks instead of an icon font: three shapes, no network request. */
+.ic { width: 15px; height: 15px; flex: none; border: 2px solid var(--ink); }
+.ic-heart { background: var(--hot); border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+.ic-candy { background: var(--rose); border-radius: 50%; }
+.ic-round { background: var(--sun); border-radius: 3px; transform: rotate(45deg); }
+
+.pill.lives { gap: 7px; }
+.lives-bar {
+  width: 62px; height: 9px;
+  background: #e6d4b6;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  overflow: hidden;
+}
+#lives-fill { height: 100%; width: 100%; background: var(--lime); transition: width 0.25s; }
+
+.blind-flag {
+  flex: none;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #d9c7f5;
+  border: 2px solid currentColor; border-radius: 99px; padding: 0 8px;
+}
+.blind-flag.hidden { display: none; }
+
+.pill.tap {
+  font: inherit;
+  font-size: 20px; font-weight: 800;
+  width: 42px;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.07s, box-shadow 0.07s;
+}
+.pill.tap:hover { transform: translateY(-1px); box-shadow: 0 4px 0 var(--ink); }
+.pill.tap:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+
+/* ----------------------------------------------------------- the shop rail */
+
+/* The shop: a panel over the terrain on the left, full height, always in the same
+   place. `--shopw` is set by main.js and the renderer keeps the plaza out from
+   under it, so the panel never covers a piñata you could have built on. */
+.rail {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: var(--shopw);
+  z-index: 6;
+  display: grid;
+  /* head, what is coming, controls, then the card list — which takes the slack.
+     Adding the `next` block shifted every child down one row and handed the
+     FLEXIBLE row to the dock, which stretched it to 468px and left a void
+     between Send and the settings buttons. The number of rows here has to match
+     the number of children in `index.html`. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 8px;
+  background: var(--panel);
+  color: var(--panel-ink);
+  border-left: 4px solid var(--ink);
+  box-shadow: -6px 0 0 rgba(20, 12, 30, 0.35);
+}
+
+/* The tagline lives in the menu; in a 136px panel it wrapped to five lines. */
+.rail-head {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--panel-line);
+}
+.rail-head strong { display: block; font-size: 17px; font-weight: 800; line-height: 1.1; color: var(--panel-ink); }
+.rail-head span { display: none; }
+
+.brand-mark {
+  width: 28px; height: 28px; flex: none;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: linear-gradient(180deg, var(--rose) 0 33%, var(--sun) 33% 66%, var(--sky) 66% 100%);
+}
+
+/* Cards are buttons, not billboards. `1fr` rows let them stretch to fill a tall
+   rail — on a 1307px window that made every card 177x243, which is what "looks
+   terrible" looked like. So: a capped row height, columns that auto-fill to keep
+   the cards roughly square at any rail width, and the leftover height centred
+   rather than divided among the cards. */
+.tower-list {
+  /* The only thing on the page that scrolls. Everything else is sized to fit the
+     window, because a tower defense that scrolls is a tower defense you cannot
+     watch. */
+  /* Sized to its rows, not stretched to the panel: stretching made the list's
+     scrollHeight equal its clientHeight, so the "is there room under the cards"
+     measurement always came back zero and the reference never appeared. */
+  flex: 0 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel-line) transparent;
+  display: grid;
+  /* 88, not 104: at ten piñatas a 104 minimum gave the 308px rail two columns and
+     five rows, and on a 720px-tall window that squeezed each card to 75px with
+     28px of icon — which `drawIcon` rounds down to a 1x stamp. Three narrower
+     columns and four rows leaves the icon room to draw at 2x. */
+  /* 82, not 88: at a 17%-of-window panel the content box lands around 182px, and
+     two 88px columns plus their gap need 184 — missing it by two pixels dropped
+     the shop to a single column of ten cards that had to be scrolled. */
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  /* A floor as well as a cap. With `minmax(0, …)` the rows compressed to fit the
+     panel — at 900x600 that gave 47px cards with a ZERO-height icon, which is a
+     shop of captioned blanks. Below the floor the list scrolls instead, which is
+     the one scroll this screen is allowed. */
+  grid-auto-rows: minmax(84px, 132px);
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* Compact shop: three columns instead of two, for a stage too short to show the
+   roster any other way. The icon drops from a 3x stamp to 2x, which is the price
+   of seeing nine piñatas instead of four — and it only applies where the choice
+   is between a smaller icon and a hidden card. */
+/* 46 and a 5px gap, not 58 and 8: at a 153px panel the list's content box is
+   123px and two 58px columns plus their gap need 124. Missing it by ONE pixel
+   dropped the shop back to a single column — the same trap the note on the
+   roomy grid above records, hit again from the other side. Sized with headroom
+   now rather than to the pixel. */
+.rail.compact .tower-list { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 5px; }
+/* `min-width: 0` is the load-bearing half. A grid item's min-content width wins
+   over the track's minimum, and "Firecracker" at 10px is ~68px — so the panel's
+   137px of content could only ever fit ONE column and compact mode made the shop
+   worse than it started. */
+.rail.compact .card { padding: 3px 2px 4px; border-width: 2px; border-radius: 10px; min-width: 0; }
+.rail.compact .card-meta strong {
+  max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail.compact .card canvas { height: 44px; }
+.rail.compact .card-meta strong { font-size: 10px; }
+.rail.compact .card-meta .cost { font-size: 9px; padding: 0 4px; }
+.rail.compact .dock { gap: 4px; padding-bottom: 6px; }
+.rail.compact .dock button.round { height: 30px; }
+.rail.compact .rail-head span { display: none; }
+
+.card {
+  font: inherit;
+  color: var(--ink);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 5px 4px 6px;
+  cursor: pointer;
+  transition: transform 0.08s, background 0.12s;
+}
+.card canvas { flex: 1 1 auto; min-height: 0; width: 100%; object-fit: contain; image-rendering: pixelated; }
+.card:hover { background: #fff; transform: translateY(-2px); box-shadow: 0 4px 0 rgba(20, 12, 30, 0.5); }
+.card:active { transform: translateY(1px); }
+.card.armed { background: var(--sun); box-shadow: inset 0 0 0 3px #fff, 0 0 0 3px var(--sun); }
+.card.broke { opacity: 0.82; filter: saturate(0.45); }
+/* The price is the part that is actually unavailable, so the price is the part
+   that gets greyed. */
+.card.broke .cost { opacity: 0.6; }
+.card-meta { flex: none; display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.card-meta strong { font-size: 14px; font-weight: 800; }
+.cost {
+  font-size: 12px; font-weight: 800;
+  background: var(--sun);
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  padding: 0 8px;
+  margin-top: 1px;
+}
+.card.broke .cost { background: #d9c9a8; }
+
+
+
+/* Everything in here must be allowed to shrink. `flex: none` on the card grid let
+   the shop keep its ideal height on a short window, and the rail's foot — the
+   play button — was drawn on top of the round preview. The card rows are
+   `minmax(0, 132px)`, so they give height up before anything gets clipped. */
+.shop { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+
+/* Content-sized, not flexible. Letting it grow into the rail's spare height made
+   a 610px bordered box holding two rows, which looks far worse than the same
+   slack left as plain panel — the shop below is sized to what it holds. */
+/* Scoped to the shop deliberately. `.next` is also the upgrade track's lit slot,
+   and an unscoped rule here reached inside the upgrade window and stretched that
+   slot into a 196px bar. */
+.next {
+  /* Was absolutely positioned at the board's bottom-left, diagonally opposite
+     the button that starts the round. It lives in the rail now, so it costs no
+     playfield width — the rail's width was already reserved — and sits where
+     the eye already is. */
+  flex: none;
+  min-height: 0;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  padding: 6px 9px 8px;
+  color: var(--paper);
+}
+.next-label { display: block; flex: none; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.62; }
+.intel { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+
+/* One row per enemy group: sprite, name, count. The old pill chips were four
+   words of text where the player needs to recognise a shape. */
+.foe { display: flex; align-items: center; gap: 8px; }
+.foe canvas { width: 26px; height: 26px; flex: none; image-rendering: pixelated; }
+.foe span { flex: 1; font-size: 12.5px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foe b {
+  flex: none; font-size: 13px; font-weight: 800;
+  background: var(--sky); border: 2px solid var(--ink); border-radius: 99px; padding: 0 8px;
+}
+.foe.boss b { background: var(--hot); color: #fff6f5; }
+.foe.unknown span { opacity: 0.45; }
+.foe.unknown b { background: #cbbcdd; }
+
+/* The counter rule for the wave that is actually coming, rather than the whole
+   matrix in a panel the player has to go and read. */
+.foe-tip {
+  margin-top: 5px;
+  font-size: 11.5px; font-weight: 700; line-height: 1.3;
+  opacity: 0.7;
+  border-top: 2px dashed var(--edge);
+  padding-top: 5px;
+}
+.foe-tip + .foe-tip { border-top: 0; padding-top: 0; margin-top: 3px; }
+
+/* BTD6's signature control: a big round green send button with a smaller round
+   fast-forward beside it, always in the same corner. It lives here and nowhere
+   else — same pixel, every round. */
+/* Over terrain now, not on a panel, so it carries its own background — the same
+   trick the sub-HUD row uses. */
+.go-label {
+  text-align: center;
+  font-size: 12px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--panel-ink);
+  background: rgba(43, 32, 56, 0.72);
+  border-radius: 99px;
+  padding: 3px 12px;
+}
+.go { display: flex; align-items: center; justify-content: center; gap: 12px; }
+
+button.round {
+  font: inherit;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: 4px solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 5px 0 var(--ink);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.07s, box-shadow 0.07s;
+}
+button.round:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 7px 0 var(--ink); }
+button.round:active:not(:disabled) { transform: translateY(5px); box-shadow: 0 0 0 var(--ink); }
+
+button.play { width: 84px; background: var(--lime); }
+button.play .tri {
+  width: 34px; height: 34px;
+  background: var(--ink);
+  /* Nudged right so the triangle's visual mass sits centred, not its bounding box. */
+  margin-left: 5px;
+  clip-path: polygon(6% 2%, 98% 50%, 6% 98%);
+}
+button.play:disabled { background: var(--edge); cursor: default; }
+button.play:disabled .tri { opacity: 0.45; }
+
+button.ff { width: 58px; background: var(--paper); font-size: 17px; font-weight: 800; }
+button.auto { width: 50px; font-size: 15px; }
+button.auto.on { background: var(--lime); }
+button.ff.fast { background: var(--sun); }
+
+/* At the foot of the shop panel: one row if it fits, stacked if the panel is
+   narrow. */
+/* Every control in one cluster under the counters, top left: the corner a player's
+   eye already goes to for lives and candy is the corner their hand goes to for the
+   round. `.controls` was an auto-fit grid for the shop panel it used to live in,
+   and in a flex cluster with no width that collapsed into a column of stacked
+   buttons. */
+/* Top right, hard against the shop panel: the hand that picks a piñata out of the
+   sidebar is already there, so the round buttons are half an inch away rather
+   than across the screen. */
+/* A single narrow column against the shop, not a wide row of labelled buttons.
+   `--dockw` is published by `fit()` and is also added to the board's reserve, so
+   the playfield stops before this rail instead of running under it. */
+.dock {
+  /* A deliberate 3x2 cluster, not a row that happens to wrap. Six buttons at
+     full size need 266px and the panel gives 234, so a flex row broke 5 + 1 and
+     looked like a mistake. */
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  justify-items: stretch;
+  /* Both are load-bearing. Without them the dock is a grid with a definite
+     height inside a flex column, so its two rows stretch to fill it — the
+     buttons ended up 230px apart with a void between Send and the settings. */
+  align-content: start;
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+  border-bottom: 3px solid rgba(0, 0, 0, 0.28);
+}
+/* Sized FROM `--dockw`, which is the same number the board reserves, so the rail
+   and the playfield can never disagree about how much room the rail takes. */
+.dock button.round { width: 100%; max-width: none; height: 34px; font-size: 13px; border-radius: 11px; }
+
+/* The primary action takes the whole top row and says what it does. The other
+   five are settings, and settings should not compete with "begin". */
+.dock button.play {
+  grid-column: 1 / -1;
+  background: var(--lime);
+  height: 46px;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  font-weight: 800; font-size: 17px; letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.dock button.play .tri { width: 15px; height: 15px; margin-left: 0; }
+.dock button.play .go-word { line-height: 1; }
+.dock button.play:disabled .go-word { opacity: 0.55; }
+
+/* While a round is waiting to be sent, the button breathes. It is the only
+   thing on the panel that moves, so it is the only thing the eye goes to —
+   which is the entire job of the state. */
+.dock button.play.ready { animation: go-breathe 1.6s ease-in-out infinite; }
+@keyframes go-breathe {
+  0%, 100% { transform: translateY(0); box-shadow: 0 5px 0 var(--ink); }
+  50% { transform: translateY(-3px); box-shadow: 0 8px 0 var(--ink); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock button.play.ready { animation: none; outline: 3px solid var(--sun); outline-offset: 3px; }
+}
+.dock button.ghost { font-size: 16px; padding: 0; min-height: 0; }
+
+/* Present for screen readers, absent from the board. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip-path: inset(50%);
+  overflow: hidden; white-space: nowrap;
+}
+
+button.primary, button.ghost {
+  font: inherit;
+  font-weight: 800;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 9px 10px;
+  min-height: 42px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 var(--ink);
+  transition: transform 0.07s, box-shadow 0.07s;
+}
+button.primary { background: var(--lime); font-size: 17px; }
+button.ghost { background: var(--paper); font-size: 14px; }
+button.primary:hover, button.ghost:hover { transform: translateY(-1px); box-shadow: 0 4px 0 var(--ink); }
+button.primary:active, button.ghost:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+button:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: 0 3px 0 var(--ink); }
+
+/* ------------------------------------------------------ the upgrade window */
+
+.upgrade {
+  position: absolute;
+  /* Never sideways. A horizontal scrollbar here means a row is too wide, and the
+     fix is always the row, never the scrollbar. */
+  overflow-x: hidden;
+  /* Defaults to the far side from the shop, which is the LEFT now. `.right` tucks
+     it against the shop instead — still over the board, never under the panel.
+     This was still anchored to the right when the shop moved there, which put the
+     window underneath it. */
+  left: 14px; top: 50%;
+  transform: translateY(-50%);
+  /* 274px was set before rows carried an ability chip as well as numbers, and
+     the tier-4 rows were clipping their last chip. It floats over the board, so
+     the extra width costs nothing but a little more terrain hidden — EXCEPT on a
+     small window, where a fixed 310px tucked against the shop hung 53px off the
+     left edge at 420x300. Capped to the room actually left beside the furniture. */
+  width: min(310px, calc(var(--stagew, 100vw) - var(--shopw) - 34px));
+  max-height: calc(100% - 28px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: rgba(255, 250, 240, 0.97);
+  border: 3px solid var(--ink);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 11px 13px 13px;
+}
+.upgrade.hidden { display: none; }
+/* main.js picks the side: less lane under it, and never over the selected piñata. */
+.upgrade.right { right: calc(var(--shopw) + 14px); left: auto; }
+
+.up-head { display: flex; align-items: center; gap: 10px; }
+.up-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex: 1; min-width: 0; }
+/* Showing a purchase you have not made yet, so it says so: lit, and lifted. */
+.up-pic.preview {
+  border-color: var(--sun);
+  box-shadow: 0 0 0 2px var(--sun);
+  transform: translateY(-1px);
+}
+.up-pic {
+  flex: none;
+  width: 64px; height: 64px;
+  image-rendering: pixelated;
+  background: rgba(0, 0, 0, 0.14);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+}
+.up-head h2 { font-size: 19px; font-weight: 800; line-height: 1.1; }
+
+#sel-rank {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  padding: 1px 9px;
+  flex: none;
+}
+
+.blurb { font-size: 13.5px; font-weight: 600; line-height: 1.35; opacity: 0.8; }
+
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mini div { background: var(--paper); border: 2px solid var(--ink); border-radius: 10px; padding: 3px; text-align: center; }
+.mini span { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; opacity: 0.6; }
+.mini strong { font-size: 16px; font-weight: 800; }
+
+.up-foot { display: grid; grid-template-columns: 1.2fr 1fr; gap: 7px; }
+#sel-target { background: var(--sky); }
+#sel-sell { background: #ffd9d8; }
+
+.paths { display: flex; flex-direction: column; gap: 6px; }
+
+.path {
+  font: inherit;
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--ink);
+  padding: 6px 8px 7px;
+  cursor: pointer;
+  transition: transform 0.07s, box-shadow 0.07s, background 0.12s;
+}
+
+/* The upgrade track: four slots, filled behind you, lit for the next buy. */
+.track { display: flex; flex-direction: column; gap: 3px; }
+.track i {
+  width: 15px; height: 7px;
+  border: 2px solid var(--ink);
+  border-radius: 3px;
+  background: #e0d0b4;
+}
+.track i.on { background: var(--sun); }
+.track i.lit { background: #fff6d4; box-shadow: inset 0 0 0 2px var(--lime); }
+/* Bottom-up, so the stack fills toward the top like a power meter. */
+.track { flex-direction: column-reverse; }
+
+/* min-width AND overflow: a grid child with `minmax(0, 1fr)` can still be pushed
+   wider by a nowrap chip inside it, which put 13px of the row outside the panel
+   and a scrollbar under the whole window. */
+.path-copy { min-width: 0; overflow: hidden; }
+.path-copy strong { display: block; font-size: 14px; font-weight: 800; line-height: 1.2; }
+.path-copy span {
+  display: block; font-size: 11.5px; font-weight: 600; line-height: 1.3;
+  opacity: 0.68;
+}
+
+.price {
+  flex: none;
+  font-size: 14px; font-weight: 800;
+  color: #6b4e0a;
+  background: var(--sun);
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  padding: 1px 9px;
+}
+.path:not(.maxed):hover { background: #fff; transform: translateY(-1px); box-shadow: 0 4px 0 var(--ink); }
+.path:not(.maxed):active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
+.path.broke { opacity: 0.5; }
+.path.blocked { background: #ece0cb; }
+
+
+/* ------------------------------------------------------ banner, sheet, modal */
+
+/* Centred on the PLAZA, not the window. The shop owns the RIGHT edge, so the
+   board's middle is half a panel to the LEFT of the window's — this was still
+   adding half a panel when the shop moved, which pushed the banner toward the
+   panel rather than away from it. */
+.banner {
+  /* Was a slab parked at 15% down the board, over the fountain and the lane —
+     the two things you most need to see when a round starts. It hangs off the
+     top edge now, where the only thing it covers is bunting. */
+  position: absolute;
+  left: var(--boardmid); top: 0;
+  transform: translate(-50%, -100%);
+  background: var(--sun);
+  border: 4px solid var(--ink);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+  box-shadow: 0 5px 0 rgba(26, 14, 30, 0.35);
+  padding: 7px 26px 9px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  /* Leaving: ease-IN, so it accelerates away and stops asking for attention. */
+  transition: opacity 0.16s cubic-bezier(0.7, 0, 0.84, 0),
+              transform 0.2s cubic-bezier(0.7, 0, 0.84, 0);
+}
+.banner strong { display: block; font-size: 23px; font-weight: 800; line-height: 1.12; }
+.banner span { font-size: 13.5px; font-weight: 700; opacity: 0.75; }
+.banner.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  /* Entering: ease-OUT, so it arrives fast and settles. */
+  transition: opacity 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.banner.boss { background: var(--hot); color: #fff6f5; }
+.banner.boss span { opacity: 0.9; }
+/* A banner that slides is a banner that can be missed by someone who cannot
+   see motion, so under reduced motion it simply appears and disappears. */
+@media (prefers-reduced-motion: reduce) {
+  .banner, .banner.show { transition: opacity 0.12s linear; transform: translate(-50%, 0); }
+  .banner { opacity: 0; }
+  .banner.show { opacity: 1; }
+}
+
+
+
+/* Below this the rail has no spare height and the panel was clipping to a 25px
+   stub of border with a sliced line of text in it, which reads as a glitch. Hide
+   it and let the ? pill be the only route. */
+/* The height media query that used to hide this is gone: main.js measures the
+   panel's actual spare room now, which is the thing a height query was standing
+   in for and got wrong whenever the card count or column count changed. */
+
+.modal {
+  position: absolute; inset: 0 var(--shopw) 0 0;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(34, 56, 74, 0.6);
+}
+.modal.show { display: flex; }
+.modal-card {
+  background: var(--paper);
+  border: 4px solid var(--ink);
+  border-radius: 20px;
+  box-shadow: 0 6px 0 var(--ink);
+  padding: 26px 32px;
+  text-align: center;
+  max-width: 420px;
+}
+.modal-card h2 { font-size: 30px; font-weight: 800; margin-bottom: 6px; }
+.modal-card p { font-size: 15px; font-weight: 600; opacity: 0.75; margin-bottom: 16px; }
+.modal-actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.modal-card button { width: 100%; }
+.modal-card button.continue { margin-top: 8px; background: var(--sky); }
+.modal-card button.hidden { display: none; }
+
+/* -------------------------------------------------------------- the menu */
+
+/* The menu belongs to the STAGE, not to the window. As `position: fixed; inset: 0`
+   it covered the whole viewport, so on a portrait window it spilled past the
+   landscape box the game actually plays in and the two disagreed about where the
+   game was. Same 16:10 box, same centring. */
+.menu {
+  position: fixed;
+  z-index: 20;
+  display: none;
+  width: 100vw;
+  /* Matches the stage, which `fit()` measures — the CSS value is only the
+     first-paint fallback before that runs. */
+  height: var(--stageh, min(100vh, calc(100vw / 1.45)));
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  align-items: center; justify-content: center;
+  padding: 16px;
+  background: rgba(28, 18, 40, 0.88);
+}
+.menu.show { display: flex; }
+
+.menu-card {
+  background: var(--paper);
+  border: 4px solid var(--ink);
+  border-radius: 24px;
+  box-shadow: 0 8px 0 var(--ink);
+  padding: 20px 26px 18px;
+  width: min(920px, 100%);
+  /* Sized to its CONTENT, then scaled to fit by `fitMenu()`. Capping the height
+     at 100% and hiding the overflow looked like it fitted and wasn't: the card's
+     box stopped at the viewport while its content carried on past it, so the
+     difficulty buttons — the only controls this screen exists for — laid out
+     250px below the fold and were simply clipped away. A scrollbar here would
+     have been the same bug with a handle on it. */
+  max-height: none;
+  overflow: visible;
+}
+
+.menu-top { display: flex; align-items: center; gap: 16px; text-align: left; }
+
+.menu-mark {
+  width: 66px; height: 66px; flex: none;
+  border-radius: 20px;
+  border: 4px solid var(--ink);
+  background:
+    linear-gradient(180deg,
+      var(--rose) 0 20%, var(--sun) 20% 40%, var(--sky) 40% 60%,
+      var(--lime) 60% 80%, #a06cd5 80% 100%);
+}
+
+.menu-card .eyebrow {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.14em;
+  text-transform: uppercase; opacity: 0.55;
+}
+.menu-card h1 { font-size: 38px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; }
+.menu-sub { font-size: 15px; font-weight: 600; opacity: 0.72; }
+
+.menu-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: left; }
+
+.menu-label {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; opacity: 0.5;
+  text-align: left; margin: 14px 0 6px;
+}
+.menu-tag { font-size: 13px; font-weight: 700; opacity: 0.7; text-align: left; margin-top: 6px; }
+
+.diffs { display: grid; gap: 9px; }
+
+.diff {
+  font: inherit;
+  display: block; width: 100%;
+  text-align: left;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 var(--ink);
+  padding: 8px 15px 9px;
+  cursor: pointer;
+  transition: transform 0.07s, box-shadow 0.07s;
+}
+.diff:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--ink); }
+.diff:active { transform: translateY(4px); box-shadow: 0 0 0 var(--ink); }
+.diff strong { display: block; font-size: 20px; font-weight: 800; line-height: 1.15; }
+.diff span { display: block; font-size: 13px; font-weight: 600; opacity: 0.78; }
+.diff em { display: block; font-style: normal; font-size: 12px; font-weight: 700; opacity: 0.6; margin-top: 1px; }
+
+.diff-fiesta { background: var(--lime); }
+.diff-plaza { background: var(--sun); }
+.diff-mascara { background: var(--hot); color: #fff4f3; }
+.diff-mascara span, .diff-mascara em { opacity: 0.9; }
+/* Not a difficulty — a workshop. Cool where the three difficulties are warm, and
+   dashed, so it reads as sitting outside the ladder rather than at the top of it. */
+.diff-sandbox { background: var(--sky); border-style: dashed; }
+/* Sits above the difficulty list rather than in it: picking up where you left
+   off is not a difficulty, and it must not look like a fifth one. */
+.diff-resume { background: var(--paper); margin-bottom: 10px; }
+.diff-resume.hidden { display: none; }
+.diff-resume strong { color: var(--ink); }
+
+.menu-best { font-size: 13px; font-weight: 700; opacity: 0.7; margin-top: 12px; min-height: 16px; text-align: left; }
+.menu-hint { font-size: 12.5px; font-weight: 600; opacity: 0.55; margin-top: 2px; line-height: 1.5; text-align: left; }
+.menu-hint b { font-weight: 800; opacity: 0.85; }
+
+/* Two across. It was a hardcoded three, and at four boards auto-fit wrapped them
+   3 + 1 with an orphan on the second row. */
+.maps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mapcard {
+  font: inherit;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 3px 0 var(--ink);
+  padding: 5px 5px 6px;
+  cursor: pointer;
+  transition: transform 0.07s, box-shadow 0.07s, background 0.12s;
+}
+.mapcard canvas { width: 100%; height: auto; border-radius: 8px; border: 2px solid var(--ink); display: block; }
+.mapcard strong { display: block; font-size: 13px; font-weight: 800; line-height: 1.2; margin-top: 4px; }
+.mapcard span { display: block; font-size: 11px; font-weight: 700; opacity: 0.6; }
+.mapcard:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--ink); }
+.mapcard.on { background: var(--sun); }
+
+/* A wrapping grid, not a flex row. El Coloso made nine mask types and nine cells
+   in a row pushed the menu card wider than the window — which is how a menu ends
+   up with a horizontal scrollbar. */
+.masks { display: grid; grid-template-columns: repeat(auto-fit, minmax(46px, 1fr)); gap: 6px; }
+.mask {
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 3px 2px 4px;
+  text-align: center;
+}
+.mask canvas { width: 38px; height: 38px; display: block; margin: 0 auto; image-rendering: pixelated; }
+.mask b { display: block; font-size: 13px; font-weight: 800; line-height: 1.2; }
+.mask span { display: block; font-size: 9.5px; font-weight: 700; opacity: 0.55; }
+.mask.none { opacity: 0.35; }
+.mask.none canvas { filter: grayscale(1); }
+
+/* -------------------------------------------------------- the blindfold */
+
+.blindfold {
+  font: inherit;
+  display: flex; align-items: center; gap: 11px;
+  width: 100%;
+  text-align: left;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 var(--ink);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: transform 0.07s, box-shadow 0.07s, background 0.12s;
+}
+.blindfold:hover { transform: translateY(-2px); box-shadow: 0 6px 0 var(--ink); }
+.blindfold:active { transform: translateY(4px); box-shadow: 0 0 0 var(--ink); }
+.blindfold.on { background: #3b2b52; color: #f3ecff; }
+
+.blind-mark {
+  width: 34px; height: 20px; flex: none;
+  border: 3px solid var(--ink);
+  border-radius: 6px;
+  background: repeating-linear-gradient(-45deg, var(--ink) 0 4px, #6b5480 4px 8px);
+}
+.blindfold.on .blind-mark { background: var(--ink); }
+
+.blind-copy { flex: 1; }
+.blind-copy strong { display: block; font-size: 17px; font-weight: 800; line-height: 1.2; }
+.blind-copy em { display: block; font-style: normal; font-size: 12px; font-weight: 600; opacity: 0.7; }
+
+.blind-state {
+  font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+  border: 2px solid currentColor; border-radius: 99px; padding: 1px 9px;
+  opacity: 0.7;
+}
+.blindfold.on .blind-state { opacity: 1; background: var(--sun); color: var(--ink); border-color: var(--ink); }
+
+/* Stacking the two menu columns fixes a NARROW window and breaks a SHORT one:
+   at 800x540 it doubled the card's height and pushed the difficulty buttons —
+   the only controls on the screen — 157px below the fold. So it only applies
+   when there is height to spend on it. */
+@media (max-width: 860px) and (min-height: 700px) {
+  .menu-cols { grid-template-columns: 1fr; gap: 0; }
+}
+
+
+/* The bottom-bar arrangement that used to live here is gone. It existed because
+   the shop took a column out of the screen and a tall window could not spare one;
+   with the shop laid over the terrain there is no column to take, so there is
+   nothing left for a second arrangement to fix. */
+
+/* Contact-sheet mode: the canvas becomes a sprite sheet, so every overlay that
+   normally floats on the board would sit on top of the first row. */
+body.sheeting .hud,
+body.sheeting .upgrade,
+body.sheeting .banner { display: none; }
+
+/* A short window still gets the whole menu without scrolling it. Measured at
+   900x600 the card overflowed by 61px, which put the difficulty buttons — the
+   only thing on this screen you have to press — below the fold. Everything here
+   is proportion, not content: nothing is hidden, it is just tighter. */
+@media (max-height: 760px) {
+  .menu-card { padding: 14px 18px 12px; }
+  .menu-top { gap: 12px; }
+  .menu-mark { width: 46px; height: 46px; border-radius: 14px; }
+  .menu-card h1 { font-size: 28px; }
+  .menu-sub { font-size: 13px; }
+  .menu-cols { gap: 16px; }
+  .menu-label { margin: 9px 0 5px; }
+  .mask canvas { width: 26px; height: 26px; }
+  .mask b { font-size: 11px; }
+  .menu-best { margin-top: 7px; }
+  .diff { padding: 8px 12px; }
+  .diff strong { font-size: 18px; }
+}
+
+/* Under ~700px of height the 2x2 map grid and the trophy wall together overflow
+   the card — measured at 900x600, the content ran 153px past the box. The maps
+   go to a single row of four and the masks to one compact strip, which together
+   give back about 320px. Nothing is hidden; both are just laid out flat. */
+@media (max-height: 700px) {
+  .maps { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .mapcard { padding: 3px 3px 4px; }
+  .mapcard strong { font-size: 12px; }
+  .mapcard span { font-size: 10px; }
+  .masks { grid-template-columns: repeat(auto-fit, minmax(34px, 1fr)); gap: 4px; }
+  .mask { padding: 2px 1px 3px; }
+  .mask canvas { width: 20px; height: 20px; }
+  .mask b { font-size: 10px; }
+  .mask span { display: none; }
+  .menu-card h1 { font-size: 24px; }
+  .menu-label { margin: 7px 0 4px; }
+}
+
+/* Shorter still: the trophy wall is a keepsake, not a control. It is the one
+   thing on this screen you never need in order to start a run, so it is the one
+   thing that gives way rather than the difficulty buttons. */
+@media (max-height: 560px) {
+  .menu-masks-wrap { display: none; }
+  .menu-card h1 { font-size: 21px; }
+  .menu-sub { font-size: 12px; }
+}
+
+/* The hover detail shares the reference panel's slot. `.swapped` hides the
+   who-is-who while it is showing, so the panel's height never changes. */
+/* Docked under the cards. It used to inherit the reference panel's box; that
+   panel is gone, so it carries its own. */
+.detail {
+  background: rgba(255, 250, 240, 0.06);
+  border: 2px solid var(--panel-line);
+  border-radius: 12px;
+  padding: 8px 10px 9px;
+  color: var(--panel-ink);
+}
+.detail.hidden { display: none; }
+body.has-detail .detail:not(.hidden) { display: block; }
+/* Beside the shop, over the board, when the panel itself has no room for it. */
+.detail.floating {
+  display: block;
+  position: fixed;
+  right: calc(var(--shopw) + 12px);
+  width: 208px;
+  color: var(--panel-ink);
+  z-index: 7;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 9px 11px 10px;
+  pointer-events: none;
+}
+.detail h3 { font-size: 14px; font-weight: 800; margin-bottom: 4px; color: var(--panel-ink); }
+.detail-blurb { font-size: 11.5px; font-weight: 600; line-height: 1.35; opacity: 0.75; margin-bottom: 6px; }
+.detail-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.detail-stats dt { opacity: 0.6; }
+.detail-stats dd { text-align: right; font-weight: 800; }
+.detail-cost {
+  color: var(--ink);
+  margin-top: 6px;
+  font-size: 12px; font-weight: 800;
+  background: var(--sun);
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  padding: 1px 9px;
+  display: inline-block;
+}
+
+/* Paused, said on the board. The pause button lives in the shop panel, and a
+   paused game looks exactly like a game between rounds otherwise. */
+body.paused .stage::after {
+  content: "Paused";
+  position: absolute;
+  left: var(--boardmid); top: 34%;
+  transform: translateX(-50%);
+  font-family: "Baloo 2", system-ui, sans-serif;
+  font-size: 28px; font-weight: 800; letter-spacing: 0.04em;
+  color: var(--panel-ink);
+  background: rgba(43, 32, 56, 0.86);
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  padding: 6px 22px 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ------------------------------------------------------- the upgrade rows */
+
+/* The numbers a tier buys, as chips. These replaced a sentence per tier: 36
+   hand-written blurbs that said less than "+6 dmg" and could go stale without
+   anyone noticing. */
+/* `.path-copy span` (0,1,1) was beating `.chips` (0,1,0), so this whole rule was
+   losing to `display: block` and the chips never wrapped as flex items at all —
+   which is also why the first-child `flex-basis: 100%` below did nothing. Scoped
+   to match, so it wins. Exactly the cascade collision that hides in plain sight:
+   nothing errors, the layout is just quietly not the one you wrote. */
+.path-copy .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; min-width: 0; }
+/* The named ability reads as a phrase, so it gets the full row and the numbers
+   wrap under it. Without this the three chips on a tier-4 row ran past the price
+   and put a horizontal scrollbar on the whole panel. */
+.path-copy .chips em:first-child:not(:only-child) { flex-basis: 100%; background: var(--sun); }
+.chips em {
+  font-style: normal;
+  font-size: 11px; font-weight: 800;
+  background: #efe2c8;
+  border: 2px solid rgba(34, 56, 74, 0.35);
+  border-radius: 99px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.path-copy strong { font-size: 14px; font-weight: 800; line-height: 1.15; }
+
+/* Cannot afford: dimmed, price in red, and still clickable — a dead button is
+   exactly what "I click upgrade and nothing happens" feels like. */
+.path.broke { background: #efe6d6; }
+.path.broke .path-copy strong, .path.broke .chips { opacity: 0.55; }
+.path.broke .price { background: #ffd9d8; color: #93231f; }
+/* Locked by the path rule: dimmed and flat, but the cursor still says "clickable"
+   because it is — the click answers with the rule instead of buying. */
+.path.blocked { opacity: 0.62; box-shadow: none; }
+.path.blocked .price { background: #ded0b6; }
+.path.blocked .chips em { background: #d9c8a8; color: #4a3a22; border-color: #4a3a22; }
+
+/* Fully upgraded is an ACHIEVEMENT, not a rule you broke. It used to render with
+   the same padlock and the same grey as a forbidden path, so finishing a path
+   looked like being told off. Gold, filled, and it keeps its box-shadow. */
+.path.maxed { background: linear-gradient(#ffe9a8, #f6cf62); cursor: default; }
+.path.maxed .price { background: var(--ink); color: var(--sun); }
+.price.maxed { font-size: 11px; letter-spacing: 0.08em; font-weight: 900; }
+
+/* The refusal: one shake, on the row, where the cursor already is. */
+@keyframes path-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.path.shake { animation: path-shake 0.22s; }
+
+/* The rule that used to live here moved the dock to the LEFT on a narrow window,
+   because a 474px-wide row of labelled buttons could not share the top edge with
+   the counters. The dock is a 56px column now, and the board reserves room for
+   it, so it fits beside the shop at every width — and moving it left put it back
+   over the playfield AND on top of the upgrade window, which is what it was
+   there to prevent. It stays on the right. */
+
+/* --------------------------------------------------------------- boss bar */
+
+/* The fight the campaign is for. Centred on the board, above everything, and
+   only on screen while he is alive — a permanent boss bar is furniture. */
+.bossbar {
+  position: absolute;
+  left: var(--boardmid); top: 12px;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(420px, 46vw);
+  background: rgba(43, 32, 56, 0.9);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 var(--ink);
+  padding: 6px 12px 8px;
+  pointer-events: none;
+}
+.bossbar.hidden { display: none; }
+.boss-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.boss-top b {
+  font-size: 15px; font-weight: 800; letter-spacing: 0.04em;
+  color: #ffd45e;
+  text-transform: uppercase;
+}
+.boss-top span { font-size: 11.5px; font-weight: 700; color: #f6ecff; opacity: 0.75; }
+.boss-track {
+  margin-top: 5px;
+  height: 13px;
+  background: #1b1226;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  overflow: hidden;
+}
+#boss-fill {
+  height: 100%; width: 100%;
+  background: var(--hot);
+  transition: width 0.18s;
+}
+/* The bar changes colour with the phase, so the thing you are watching tells you
+   which fight you are in. */
+.bossbar.p1 #boss-fill { background: #f2c53d; }
+.bossbar.p2 #boss-fill { background: #7ec850; }
+
+.menu-goal { font-size: 13.5px; font-weight: 700; opacity: 0.8; margin-top: 2px; }
+.menu-goal b { color: #b8422f; }
+
+/* Narrow windows again, and this has to come AFTER the boss bar's own rules:
+   same specificity, so source order decides, and written above them the override
+   lost silently. The counters, the controls and the boss bar cannot share one row
+   at this width, so they stack — counters, controls, then the fight. */
+@media (max-width: 780px) {
+  .bossbar {
+    top: var(--boss-top, 210px);
+    left: 14px;
+    width: calc(100% - var(--shopw) - 28px);
+    transform: none;
+  }
+}
+
+/* The rail in compact mode drops the prose but keeps the roster: knowing WHAT
+   is coming survives, knowing the rule of thumb about it does not. */
+.rail.compact .next { margin-bottom: 6px; padding: 4px 7px 6px; }
+.rail.compact .foe-tip { display: none; }
+.rail.compact .foe canvas { width: 22px; height: 22px; }
+
+
+/* ---------------------------------------------------------------- focus ---
+   The stylesheet had ZERO `:focus` rules for sixteen focusable controls, so a
+   keyboard player got whatever the browser drew on top of a heavy custom border
+   — which on these buttons is next to nothing.
+
+   `:focus-visible` rather than `:focus`, so a mouse click never leaves a ring
+   behind on the card it pressed. Two rings, dark inside and bright outside, so
+   the same style is legible on the cream shop cards AND on the dark rail
+   without either one needing its own rule. */
+/* NOT `:where(...)`: that selector has zero specificity, so any existing rule
+   that touches `outline` beats it and the ring silently never appears. */
+button:focus-visible,
+[href]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--sun);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(26, 14, 30, 0.55);
+  border-radius: inherit;
+}
+/* The board itself is focusable for keyboard play; a ring around the whole
+   playfield would be absurd, so it gets an inset one. */
+#board:focus-visible { outline: 3px solid var(--sun); outline-offset: -3px; box-shadow: none; }
+
+/* The count pill sits inside `.next`, which sets a pale colour for the panel.
+   The pill has its own bright teal background, so it has to opt back out — it
+   was inheriting cream-on-teal at 1.96:1, which is unreadable. */
+.next .foe b { color: var(--ink); }
+
+/* Dark ink on a dark translucent strip, 1.23:1. The map/difficulty line under
+   the counters has been unreadable for a while; it sits on the panel, so it
+   takes the panel's text colour. */
+.hud-row.sub { color: var(--panel-ink); }
+
+/* A round sent on top of one already walking. Available, clearly, but not
+   nagging: the breathing animation is reserved for the gap between rounds,
+   because a pulsing button mid-fight reads as "you are behind". */
+.dock button.play.early {
+  background: var(--sun);
+  animation: none;
+}
+.dock button.play.early .go-word { font-size: 15px; }
+
+
+/* ------------------------------------------------------------- bestiary ---
+   The trophy wall used to record only WHAT you had beaten. Each cell is a
+   button now, and an unmasked luchador shows the rule that made it hard and the
+   thing that answers it — which is how the counter matrix stops being something
+   you can only learn by losing. */
+.mask { font: inherit; color: inherit; cursor: pointer; text-align: center; }
+.mask:hover:not(.none) { transform: translateY(-2px); }
+.mask { transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) { .mask { transition: none; } }
+.mask.boss { outline: 2px solid var(--hot); outline-offset: 2px; border-radius: 8px; }
+
+.card-pop {
+  display: none;
+  margin-top: 12px;
+  padding: 14px 16px 15px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+}
+.card-pop.show { display: block; }
+.card-pop h3 { margin: 0 0 2px; font-size: 17px; font-weight: 800; }
+.boss-tag {
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  background: var(--hot); color: #fff6f5; border-radius: 99px; padding: 2px 8px;
+  vertical-align: middle;
+}
+.card-stats {
+  margin: 0 0 10px; font-size: 12px; font-weight: 700; opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.card-none { margin: 0; font-size: 13.5px; opacity: 0.7; }
+.card-rule { display: flex; flex-direction: column; gap: 1px; margin-top: 9px; }
+.card-rule strong { font-size: 13.5px; font-weight: 800; }
+.card-rule span { font-size: 13px; opacity: 0.72; }
+.card-rule span::before { content: "→ "; opacity: 0.55; }
+
+/* ---------------------------------------------------------------- heroes ---
+   Three cards, and the copy leads with what each hero PULLS your build towards
+   rather than with its numbers — the reason to pick one is the shape of the run.
+   A row on wide windows, stacked when the column is narrow. */
+.heroes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.herocard {
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--paper); border: 3px solid var(--ink); border-radius: 12px;
+  padding: 9px 11px 10px;
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), background 0.12s;
+}
+.herocard:hover { transform: translateY(-2px); }
+.herocard.on { background: var(--lime); box-shadow: 0 4px 0 var(--ink); }
+.herocard strong { font-size: 14.5px; font-weight: 800; line-height: 1.15; }
+.herocard em { font-style: normal; font-size: 11px; font-weight: 700; opacity: 0.55; }
+.herocard .hero-pull { font-size: 11.5px; line-height: 1.35; opacity: 0.75; margin-top: 4px; }
+.herocard .cost {
+  align-self: flex-start; margin-top: 7px;
+  font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: var(--sun); border: 2px solid var(--ink); border-radius: 99px; padding: 1px 8px;
+}
+@media (prefers-reduced-motion: reduce) { .herocard { transition: none; } }
+
+/* The hero's own shop card, marked so it does not read as one more piñata. */
+.card.hero-card { border-color: var(--hot); box-shadow: 0 0 0 2px rgba(255,157,143,0.3); }

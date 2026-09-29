@@ -1,0 +1,862 @@
+/**
+ * The piñatas, drawn at SCREEN resolution with real curves.
+ *
+ * Why this module exists
+ * ----------------------
+ * Everything used to be authored as a 20x24 grid of art pixels, blitted into a
+ * 320x200 buffer, and upscaled with nearest-neighbour at 3-6x. That has a hard
+ * ceiling: a piñata is about 24 pixels tall no matter how big the screen is, so
+ * the only things that fit on it are two eyes and a couple of bands. Ten of them
+ * on a board came out as "coloured blobs with eyes", and no amount of redrawing
+ * inside a 24px grid fixes that — the grid IS the problem.
+ *
+ * So the terrain stays in the low-res buffer, where chunkiness reads as texture,
+ * and the ACTORS are drawn on top at full resolution. At a board scale of 3 that
+ * is nine times the pixels to describe a piñata with, which is the difference
+ * between "a blob with eyes" and "a chili pepper with a flame on its head".
+ *
+ * The three rules every figure follows, taken from what makes BTD6, Kingdom Rush
+ * and Plants vs Zombies readable at a glance:
+ *
+ *   1. SILHOUETTE FIRST. You should know which piñata it is from its outline
+ *      alone, before any colour. No two share a shape: a star, a pepper, a
+ *      bubble, a rattle, a banner, a rocket, a dancer, a trio, a candle, a pot.
+ *   2. ONE SIGNATURE PROP that says what it DOES. The chili wears a flame, the
+ *      maraca rings, the coin spills coins. Function is legible without reading.
+ *   3. A THICK DARK OUTLINE and a flat fill with one light source. That is what
+ *      keeps a shape readable against busy terrain at any size.
+ *
+ * Everything is drawn in a normalised box and scaled, so a figure is as crisp at
+ * 40px as at 200px. Nothing here is read by the sim.
+ */
+
+const INK = "#22384a";
+
+/** A piñata's own colours: light, mid, dark, plus a trim. */
+const SKIN = {
+  candy: { lo: "#ffd9e6", mid: "#ff7fae", hi: "#ffeef4", dk: "#b83a69", trim: "#ffd45e" },
+  chili: { lo: "#ff8f7d", mid: "#e8443c", hi: "#ffc4b6", dk: "#8f1f1f", trim: "#5fae35" },
+  gum: { lo: "#e2c8ff", mid: "#a878e0", hi: "#f2e6ff", dk: "#5f3596", trim: "#ffbde6" },
+  maraca: { lo: "#ffe9a8", mid: "#f2b93d", hi: "#fff6d8", dk: "#a86a10", trim: "#e8443c" },
+  papel: { lo: "#c8f0a0", mid: "#7ec850", hi: "#e8ffd0", dk: "#3a7a2c", trim: "#ffd45e" },
+  firecracker: { lo: "#ffb0a0", mid: "#e8524f", hi: "#ffd8cc", dk: "#8f2020", trim: "#ffd45e" },
+  ribbon: { lo: "#ffd0f0", mid: "#ff7fd0", hi: "#fff0fa", dk: "#b8368f", trim: "#ffd45e" },
+  mariachi: { lo: "#cfc6ff", mid: "#8f7fe0", hi: "#eae4ff", dk: "#4a3596", trim: "#ffd45e" },
+  sparkler: { lo: "#b8f4f8", mid: "#4fc8d8", hi: "#e0fbff", dk: "#1f7a8c", trim: "#fff3bd" },
+  coin: { lo: "#d8f4a8", mid: "#8fd44f", hi: "#eeffd0", dk: "#3f8f2c", trim: "#ffd45e" },
+};
+
+/** Vertical gradient for a body: light at the top-left, dark at the bottom. */
+function shade(g, s, x, y, r) {
+  const grad = g.createLinearGradient(x - r * 0.4, y - r, x + r * 0.3, y + r);
+  grad.addColorStop(0, s.lo);
+  grad.addColorStop(0.55, s.mid);
+  grad.addColorStop(1, s.dk);
+  return grad;
+}
+
+/**
+ * Outline weight, proportional so it reads the same at every size.
+ *
+ * 0.13 was too heavy: measured, the chili, firecracker and sparkler came out
+ * with 56-58% of their pixels dark, so the outline WAS the figure and they read
+ * as black blobs. Bold enough to separate them from the terrain, light enough to
+ * leave the colour visible.
+ */
+const pen = (r) => Math.max(1.2, r * 0.07);
+
+function stroked(g, r, fill, path) {
+  g.beginPath();
+  path();
+  g.fillStyle = fill;
+  g.fill();
+  g.lineWidth = pen(r);
+  g.strokeStyle = INK;
+  g.lineJoin = "round";
+  g.stroke();
+}
+
+/**
+ * A crepe fringe band across a body — the texture that says "piñata" rather than
+ * "ball". Clipped to the body so it wraps instead of hanging off it.
+ */
+function band(g, x, y, w, r, col, wob = 0.34) {
+  g.save();
+  g.beginPath();
+  g.moveTo(x - w, y);
+  const step = w / 5;
+  for (let i = -5; i < 5; i++)
+    g.quadraticCurveTo(x + (i + 0.5) * step, y + (i % 2 ? -1 : 1) * r * wob * 0.5, x + (i + 1) * step, y);
+  g.lineTo(x + w, y + r * 0.22);
+  for (let i = 5; i > -5; i--)
+    g.quadraticCurveTo(x + (i - 0.5) * step, y + r * 0.22 + (i % 2 ? -1 : 1) * r * wob * 0.5, x + (i - 1) * step, y + r * 0.22);
+  g.closePath();
+  g.fillStyle = col;
+  g.fill();
+  g.restore();
+}
+
+/** The cord it hangs from, and its knot. */
+function cord(g, x, y, r) {
+  g.beginPath();
+  g.moveTo(x, y);
+  g.lineTo(x, y - r * 0.42);
+  g.lineWidth = Math.max(1.2, r * 0.08);
+  g.strokeStyle = "#8a6a4a";
+  g.stroke();
+}
+
+
+// ------------------------------------------------------------- limbs and kit
+//
+// The half that was missing, and the reason ten piñatas read as "coloured shapes
+// with smiley faces": they had no ARMS and nothing IN them. A Bloons monkey is
+// legible because you can see the dart in its hand and watch it throw; a
+// Peashooter is legible because it has a barrel for a mouth. Function has to be
+// visible in the body, not written on a card.
+//
+// So every piñata now has two arms, and the front one holds the thing it
+// actually does — a paper horn, a flame, a maraca, a wand, a trumpet, a sparkler,
+// a fistful of coins. The weapon arm points where the piñata is AIMING, and
+// winds back and recoils when it fires, so you can watch it work.
+
+/** A tapered limb ending in a mitt. */
+function arm(g, x0, y0, x1, y1, r, col) {
+  g.beginPath();
+  g.moveTo(x0, y0);
+  const mx = (x0 + x1) / 2 - (y1 - y0) * 0.18;
+  const my = (y0 + y1) / 2 + (x1 - x0) * 0.18;
+  g.quadraticCurveTo(mx, my, x1, y1);
+  g.lineWidth = r * 0.17;
+  g.strokeStyle = INK;
+  g.lineCap = "round";
+  g.stroke();
+  g.lineWidth = r * 0.1;
+  g.strokeStyle = col;
+  g.stroke();
+  // The mitt: a hand you can see holding something.
+  g.beginPath();
+  g.arc(x1, y1, r * 0.13, 0, Math.PI * 2);
+  g.fillStyle = col;
+  g.fill();
+  g.lineWidth = Math.max(1, r * 0.055);
+  g.strokeStyle = INK;
+  g.stroke();
+}
+
+/**
+ * Where the weapon hand sits: out along the aim, with a wind-up before the shot
+ * and a kick after it. `fire` runs 1 -> 0 across the recoil.
+ */
+function grip(x, y, r, aim, fire, reach = 0.95) {
+  const push = 1 - fire * 0.55;
+  return [x + Math.cos(aim) * r * reach * push, y + Math.sin(aim) * r * reach * push];
+}
+
+/** A muzzle flash, for the frame after a shot. */
+function flash(g, x, y, r, aim, fire, col) {
+  if (fire <= 0.35) return;
+  const a = (fire - 0.35) / 0.65;
+  g.save();
+  g.globalAlpha = a;
+  g.translate(x, y);
+  g.rotate(aim);
+  g.beginPath();
+  for (let i = 0; i < 7; i++) {
+    const th = (i / 7) * Math.PI * 2;
+    const rr = (i % 2 ? 0.2 : 0.5) * r * (0.7 + a * 0.5);
+    const px = Math.cos(th) * rr, py = Math.sin(th) * rr;
+    i ? g.lineTo(px, py) : g.moveTo(px, py);
+  }
+  g.closePath();
+  g.fillStyle = col;
+  g.fill();
+  g.restore();
+}
+
+/**
+ * What each piñata is holding, drawn at the weapon hand and rotated to the aim.
+ * This is the single most important thing on the figure: it is what tells you,
+ * without any text, what the piñata does.
+ */
+const WEAPON = {
+  // A rolled paper horn it fires hard candy out of.
+  candy(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim);
+    stroked(g, r * 0.5, s.trim, () => {
+      g.moveTo(-r * 0.18, -r * 0.16);
+      g.lineTo(r * 0.5, -r * 0.3);
+      g.lineTo(r * 0.5, r * 0.3);
+      g.lineTo(-r * 0.18, r * 0.16);
+      g.closePath();
+    });
+    g.restore();
+    flash(g, hx + Math.cos(aim) * r * 0.5, hy + Math.sin(aim) * r * 0.5, r * 0.55, aim, fire, "#fff3bd");
+  },
+
+  // A jet of flame. No object — the fire IS the weapon.
+  chili(g, hx, hy, r, s, aim, fire) {
+    const n = 3;
+    for (let i = 0; i < n; i++) {
+      const t = i / n;
+      const rr = r * (0.34 - t * 0.16) * (1 + fire * 0.5);
+      const px = hx + Math.cos(aim) * r * (0.2 + t * 0.55);
+      const py = hy + Math.sin(aim) * r * (0.2 + t * 0.55);
+      g.beginPath();
+      g.arc(px, py, rr, 0, Math.PI * 2);
+      g.fillStyle = i === 0 ? "#ffd45e" : i === 1 ? "#f28b3c" : "#e8443c";
+      g.globalAlpha = 0.92;
+      g.fill();
+      g.globalAlpha = 1;
+    }
+  },
+
+  // A bubble on a wand, ready to be lobbed.
+  gum(g, hx, hy, r, s, aim, fire) {
+    const rr = r * (0.3 + fire * 0.16);
+    g.save();
+    g.globalAlpha = 0.8;
+    stroked(g, r * 0.4, s.trim, () => g.arc(hx + Math.cos(aim) * r * 0.28, hy + Math.sin(aim) * r * 0.28, rr, 0, Math.PI * 2));
+    g.restore();
+    g.beginPath();
+    g.arc(hx + Math.cos(aim) * r * 0.28 - rr * 0.3, hy + Math.sin(aim) * r * 0.28 - rr * 0.35, rr * 0.28, 0, Math.PI * 2);
+    g.fillStyle = "#ffffff";
+    g.fill();
+  },
+
+  // A maraca, mid-shake, with the arcs that say it is loud.
+  maraca(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim + Math.sin(fire * 9) * 0.5);
+    stroked(g, r * 0.4, "#b8834c", () => {
+      g.moveTo(-r * 0.05, -r * 0.06);
+      g.lineTo(r * 0.34, -r * 0.05);
+      g.lineTo(r * 0.34, r * 0.05);
+      g.lineTo(-r * 0.05, r * 0.06);
+      g.closePath();
+    });
+    stroked(g, r * 0.45, s.trim, () => g.arc(r * 0.46, 0, r * 0.2, 0, Math.PI * 2));
+    g.restore();
+    if (fire > 0.2) {
+      g.save();
+      g.globalAlpha = fire * 0.8;
+      for (let i = 1; i <= 2; i++) {
+        g.beginPath();
+        g.arc(hx + Math.cos(aim) * r * 0.5, hy + Math.sin(aim) * r * 0.5, r * (0.3 + i * 0.22), aim - 0.9, aim + 0.9);
+        g.lineWidth = r * 0.06;
+        g.strokeStyle = "#e2ddff";
+        g.stroke();
+      }
+      g.restore();
+    }
+  },
+
+  // Paper strips it flicks. The papel picado cuts what walks under it.
+  papel(g, hx, hy, r, s, aim, fire) {
+    for (let i = -1; i <= 1; i++) {
+      g.beginPath();
+      g.moveTo(hx, hy);
+      g.quadraticCurveTo(
+        hx + Math.cos(aim + i * 0.4) * r * 0.4,
+        hy + Math.sin(aim + i * 0.4) * r * 0.4,
+        hx + Math.cos(aim + i * 0.55) * r * (0.7 + fire * 0.3),
+        hy + Math.sin(aim + i * 0.55) * r * (0.7 + fire * 0.3),
+      );
+      g.lineWidth = r * 0.11;
+      g.strokeStyle = i === 0 ? s.trim : s.mid;
+      g.lineCap = "round";
+      g.stroke();
+    }
+  },
+
+  // A lit match held to a rocket.
+  firecracker(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim);
+    stroked(g, r * 0.4, s.trim, () => {
+      g.moveTo(-r * 0.1, -r * 0.13);
+      g.lineTo(r * 0.42, -r * 0.13);
+      g.lineTo(r * 0.56, 0);
+      g.lineTo(r * 0.42, r * 0.13);
+      g.lineTo(-r * 0.1, r * 0.13);
+      g.closePath();
+    });
+    g.restore();
+    flash(g, hx + Math.cos(aim) * r * 0.6, hy + Math.sin(aim) * r * 0.6, r * 0.7, aim, fire, "#ffd45e");
+  },
+
+  // A ribbon wand, trailing a spiral.
+  ribbon(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(r * 0.38, 0);
+    g.lineWidth = r * 0.07;
+    g.strokeStyle = "#b8834c";
+    g.stroke();
+    g.beginPath();
+    g.moveTo(r * 0.38, 0);
+    for (let i = 1; i <= 12; i++) {
+      const t = i / 12;
+      g.lineTo(r * (0.38 + t * 0.9), Math.sin(t * 7 + fire * 4) * r * 0.28 * t);
+    }
+    g.lineWidth = r * 0.09;
+    g.strokeStyle = s.mid;
+    g.lineCap = "round";
+    g.stroke();
+    g.restore();
+  },
+
+  // A trumpet. The mariachi buffs, so it plays rather than shoots.
+  mariachi(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim - 0.5);
+    stroked(g, r * 0.4, "#ffd45e", () => {
+      g.moveTo(0, -r * 0.07);
+      g.lineTo(r * 0.34, -r * 0.07);
+      g.lineTo(r * 0.52, -r * 0.24);
+      g.lineTo(r * 0.52, r * 0.24);
+      g.lineTo(r * 0.34, r * 0.07);
+      g.lineTo(0, r * 0.07);
+      g.closePath();
+    });
+    g.restore();
+  },
+
+  // A sparkler held aloft, throwing sparks.
+  sparkler(g, hx, hy, r, s, aim, fire) {
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(aim);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(r * 0.5, 0);
+    g.lineWidth = r * 0.07;
+    g.strokeStyle = "#93a4b8";
+    g.stroke();
+    g.restore();
+    const tip = [hx + Math.cos(aim) * r * 0.5, hy + Math.sin(aim) * r * 0.5];
+    for (let i = 0; i < 6; i++) {
+      const th = (i / 6) * Math.PI * 2 + fire * 3;
+      g.beginPath();
+      g.moveTo(tip[0], tip[1]);
+      g.lineTo(tip[0] + Math.cos(th) * r * (0.16 + fire * 0.2), tip[1] + Math.sin(th) * r * (0.16 + fire * 0.2));
+      g.lineWidth = r * 0.045;
+      g.strokeStyle = i % 2 ? "#fff3bd" : "#ffd45e";
+      g.stroke();
+    }
+  },
+
+  // A fistful of coins, tossed.
+  coin(g, hx, hy, r, s, aim, fire) {
+    for (let i = 0; i < 3; i++) {
+      const t = i / 3;
+      const px = hx + Math.cos(aim) * r * (0.16 + t * 0.42);
+      const py = hy + Math.sin(aim) * r * (0.16 + t * 0.42) - t * r * 0.18;
+      stroked(g, r * 0.26, "#ffd45e", () => g.ellipse(px, py, r * 0.16, r * 0.12, 0.4, 0, Math.PI * 2));
+    }
+  },
+};
+
+/** Where each piñata's shoulders sit, as a fraction of its half-height. */
+const SHOULDER = {
+  candy: 0.1, chili: 0.24, gum: 0.05, maraca: 0.06, papel: 0.3,
+  firecracker: 0.24, ribbon: 0.2, mariachi: 0.3, sparkler: 0.5, coin: 0.2,
+};
+
+// ---------------------------------------------------------------- the bodies
+//
+// Each takes (g, x, y, r) where y is the piñata's CENTRE and r is half its
+// height, and draws the body only — props, face and upgrade marks are added by
+// the caller so they layer consistently across all ten.
+
+const BODIES = {
+  // The iconic seven-point star. Five points read at this size; seven is mush.
+  candy(g, x, y, r, s) {
+    const pts = 5;
+    for (let i = 0; i < pts; i++) {
+      const a = -Math.PI / 2 + (i / pts) * Math.PI * 2;
+      stroked(g, r * 0.5, i % 2 ? s.trim : s.mid, () => {
+        g.moveTo(x + Math.cos(a - 0.42) * r * 0.6, y + Math.sin(a - 0.42) * r * 0.6);
+        g.lineTo(x + Math.cos(a) * r * 1.22, y + Math.sin(a) * r * 1.22);
+        g.lineTo(x + Math.cos(a + 0.42) * r * 0.6, y + Math.sin(a + 0.42) * r * 0.6);
+        g.closePath();
+      });
+    }
+    stroked(g, r, shade(g, s, x, y, r), () => g.arc(x, y, r * 0.68, 0, Math.PI * 2));
+    band(g, x, y - r * 0.18, r * 0.6, r, s.trim);
+    band(g, x, y + r * 0.26, r * 0.6, r, s.hi, 0.22);
+  },
+
+  // A chili hangs stalk-up and curves. Nothing else on the board is a taper.
+  chili(g, x, y, r, s) {
+    stroked(g, r, shade(g, s, x, y, r), () => {
+      g.moveTo(x - r * 0.42, y - r * 0.82);
+      g.quadraticCurveTo(x + r * 0.62, y - r * 0.3, x + r * 0.3, y + r * 0.55);
+      g.quadraticCurveTo(x + r * 0.1, y + r * 1.05, x - r * 0.16, y + r * 0.82);
+      g.quadraticCurveTo(x - r * 0.62, y + r * 0.1, x - r * 0.42, y - r * 0.82);
+      g.closePath();
+    });
+    band(g, x - r * 0.05, y - r * 0.24, r * 0.36, r, s.trim);
+    band(g, x + r * 0.06, y + r * 0.24, r * 0.32, r, s.trim);
+    // Stalk.
+    stroked(g, r * 0.4, s.trim, () => {
+      g.moveTo(x - r * 0.42, y - r * 0.78);
+      g.quadraticCurveTo(x - r * 0.2, y - r * 1.25, x + r * 0.18, y - r * 1.12);
+      g.quadraticCurveTo(x - r * 0.1, y - r * 0.92, x - r * 0.42, y - r * 0.78);
+      g.closePath();
+    });
+  },
+
+  // Round and sagging, with a bubble it is too sleepy to pop.
+  gum(g, x, y, r, s) {
+    stroked(g, r, shade(g, s, x, y, r), () => g.ellipse(x, y + r * 0.06, r * 0.86, r * 0.9, 0, 0, Math.PI * 2));
+    band(g, x, y - r * 0.28, r * 0.72, r, s.trim);
+    band(g, x, y + r * 0.3, r * 0.72, r, s.hi, 0.2);
+    // The bubble, translucent so it reads as blown rather than stuck on.
+    g.save();
+    g.globalAlpha = 0.75;
+    stroked(g, r * 0.6, s.trim, () => g.arc(x + r * 0.92, y - r * 0.42, r * 0.42, 0, Math.PI * 2));
+    g.restore();
+  },
+
+  // The only silhouette with a stick.
+  maraca(g, x, y, r, s) {
+    // A SMALL bulb on a LONG stick. At a bulb of 0.82r it was just a circle, and
+    // measured 0.81 silhouette overlap with the coin pot — the two were the same
+    // object in different colours.
+    stroked(g, r * 0.4, "#b8834c", () => {
+      g.moveTo(x + r * 0.04, y + r * 0.16);
+      g.lineTo(x + r * 0.74, y + r * 1.2);
+      g.lineTo(x + r * 0.44, y + r * 1.36);
+      g.lineTo(x - r * 0.22, y + r * 0.34);
+      g.closePath();
+    });
+    stroked(g, r * 0.8, shade(g, s, x, y - r * 0.3, r * 0.7), () =>
+      g.ellipse(x - r * 0.06, y - r * 0.32, r * 0.6, r * 0.66, 0, 0, Math.PI * 2));
+    band(g, x - r * 0.06, y - r * 0.5, r * 0.46, r, s.trim);
+    for (const [dx, dy] of [[-0.3, 0.1], [0.24, -0.1], [0.02, 0.34], [-0.06, -0.36]]) {
+      g.beginPath();
+      g.arc(x + dx * r, y + dy * r, r * 0.09, 0, Math.PI * 2);
+      g.fillStyle = s.dk;
+      g.fill();
+    }
+  },
+
+  // Not a body: a sheet of cut paper on a cord.
+  papel(g, x, y, r, s) {
+    g.beginPath();
+    g.moveTo(x - r * 1.3, y - r * 0.92);
+    g.quadraticCurveTo(x, y - r * 0.74, x + r * 1.3, y - r * 0.92);
+    g.lineWidth = Math.max(1.2, r * 0.07);
+    g.strokeStyle = "#8a6a4a";
+    g.stroke();
+    for (let i = 0; i < 3; i++) {
+      const w = r * (0.92 - i * 0.16);
+      const top = y - r * 0.78 + i * r * 0.6;
+      stroked(g, r * 0.7, i % 2 ? s.trim : shade(g, s, x, y, r), () => {
+        g.moveTo(x - w, top);
+        g.lineTo(x + w, top);
+        g.lineTo(x + w, top + r * 0.46);
+        // A cut hem, so it hangs like paper.
+        for (let k = 4; k >= 0; k--)
+          g.lineTo(x - w + (2 * w * k) / 5, top + r * (k % 2 ? 0.34 : 0.5));
+        g.closePath();
+      });
+      // Punched diamonds.
+      for (let k = -1; k <= 1; k++) {
+        g.beginPath();
+        const cx = x + k * w * 0.5;
+        const cy = top + r * 0.2;
+        g.moveTo(cx, cy - r * 0.1);
+        g.lineTo(cx + r * 0.09, cy);
+        g.lineTo(cx, cy + r * 0.1);
+        g.lineTo(cx - r * 0.09, cy);
+        g.closePath();
+        g.fillStyle = INK;
+        g.globalAlpha = 0.35;
+        g.fill();
+        g.globalAlpha = 1;
+      }
+    }
+  },
+
+  // A cracker with a lit fuse.
+  firecracker(g, x, y, r, s) {
+    stroked(g, r, shade(g, s, x, y, r), () => {
+      g.moveTo(x - r * 0.46, y - r * 0.5);
+      g.lineTo(x + r * 0.46, y - r * 0.5);
+      g.lineTo(x + r * 0.46, y + r * 0.95);
+      g.lineTo(x - r * 0.46, y + r * 0.95);
+      g.closePath();
+    });
+    band(g, x, y - r * 0.12, r * 0.42, r, s.trim, 0.16);
+    band(g, x, y + r * 0.44, r * 0.42, r, s.trim, 0.16);
+    // Nose cone.
+    stroked(g, r * 0.6, s.dk, () => {
+      g.moveTo(x - r * 0.5, y - r * 0.48);
+      g.lineTo(x, y - r * 1.1);
+      g.lineTo(x + r * 0.5, y - r * 0.48);
+      g.closePath();
+    });
+  },
+
+  // Streamers. The one outline that leaves the body and comes back.
+  ribbon(g, x, y, r, s) {
+    for (let i = 0; i < 3; i++) {
+      g.beginPath();
+      g.moveTo(x + r * 0.2, y - r * 0.3 + i * r * 0.3);
+      g.bezierCurveTo(
+        x + r * 0.9, y - r * (0.7 - i * 0.4),
+        x + r * 1.5, y + r * (0.1 + i * 0.3),
+        x + r * 1.15, y + r * (0.55 + i * 0.2),
+      );
+      g.lineWidth = Math.max(1.4, r * 0.13);
+      g.strokeStyle = i === 1 ? s.trim : s.mid;
+      g.lineCap = "round";
+      g.stroke();
+    }
+    stroked(g, r, shade(g, s, x, y, r), () => {
+      g.moveTo(x - r * 0.42, y - r * 0.62);
+      g.quadraticCurveTo(x + r * 0.42, y - r * 0.5, x + r * 0.2, y + r * 0.95);
+      g.lineTo(x - r * 0.3, y + r * 0.95);
+      g.quadraticCurveTo(x - r * 0.62, y - r * 0.2, x - r * 0.42, y - r * 0.62);
+      g.closePath();
+    });
+    stroked(g, r * 0.7, s.lo, () => g.arc(x - r * 0.08, y - r * 0.66, r * 0.38, 0, Math.PI * 2));
+  },
+
+  // Three of them, in sombreros. A band, not a piñata with a hat.
+  mariachi(g, x, y, r, s) {
+    for (const [dx, lift] of [[-0.78, 0.12], [0, -0.06], [0.78, 0.12]]) {
+      const cx = x + dx * r;
+      const cy = y + lift * r + r * 0.2;
+      stroked(g, r * 0.6, shade(g, s, cx, cy, r * 0.5), () => g.arc(cx, cy, r * 0.42, 0, Math.PI * 2));
+      // Brim: wider than the head, which is the whole read.
+      stroked(g, r * 0.5, s.trim, () => g.ellipse(cx, cy - r * 0.34, r * 0.62, r * 0.16, 0, 0, Math.PI * 2));
+      stroked(g, r * 0.4, s.trim, () => g.arc(cx, cy - r * 0.5, r * 0.22, Math.PI, 0));
+    }
+  },
+
+  // Tall, thin, topped with a star.
+  sparkler(g, x, y, r, s) {
+    stroked(g, r, shade(g, s, x, y, r), () => {
+      g.moveTo(x - r * 0.34, y + r * 0.1);
+      g.lineTo(x + r * 0.34, y + r * 0.1);
+      g.lineTo(x + r * 0.28, y + r * 1.0);
+      g.lineTo(x - r * 0.28, y + r * 1.0);
+      g.closePath();
+    });
+    band(g, x, y + r * 0.42, r * 0.3, r, s.hi, 0.16);
+    g.beginPath();
+    g.moveTo(x, y + r * 0.1);
+    g.lineTo(x, y - r * 0.5);
+    g.lineWidth = Math.max(1.2, r * 0.09);
+    g.strokeStyle = "#8a6a4a";
+    g.stroke();
+    // The star on top.
+    stroked(g, r * 0.55, s.trim, () => {
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+        const rr = i % 2 ? r * 0.22 : r * 0.55;
+        const px = x + Math.cos(a) * rr;
+        const py = y - r * 0.72 + Math.sin(a) * rr;
+        i ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath();
+    });
+  },
+
+  // A fat pot, overflowing.
+  coin(g, x, y, r, s) {
+    // A pot: pinched neck, wide belly, a foot. The neck is what separates it from
+    // every other round body on the board.
+    stroked(g, r, shade(g, s, x, y, r), () => {
+      g.moveTo(x - r * 0.3, y - r * 0.78);
+      g.lineTo(x - r * 0.34, y - r * 0.5);
+      g.quadraticCurveTo(x - r * 1.02, y + r * 0.12, x - r * 0.44, y + r * 0.82);
+      g.lineTo(x + r * 0.44, y + r * 0.82);
+      g.quadraticCurveTo(x + r * 1.02, y + r * 0.12, x + r * 0.34, y - r * 0.5);
+      g.lineTo(x + r * 0.3, y - r * 0.78);
+      g.closePath();
+    });
+    // The rim and the foot, both wider than what they sit on.
+    stroked(g, r * 0.4, s.trim, () => g.ellipse(x, y - r * 0.78, r * 0.42, r * 0.13, 0, 0, Math.PI * 2));
+    stroked(g, r * 0.4, s.dk, () => g.ellipse(x, y + r * 0.84, r * 0.56, r * 0.14, 0, 0, Math.PI * 2));
+    band(g, x, y + r * 0.06, r * 0.66, r, s.trim);
+    // Coins spilling out of the neck.
+    for (const [dx, dy, rr] of [[-0.2, -0.86, 0.2], [0.24, -0.95, 0.17], [0.02, -1.02, 0.14]]) {
+      stroked(g, r * 0.3, "#ffd45e", () => g.ellipse(x + dx * r, y + dy * r, rr * r, rr * r * 0.72, 0, 0, Math.PI * 2));
+    }
+  },
+};
+
+/** Every piñata this module can draw, for the coverage test. */
+export const FIGURE_NAMES = Object.keys(BODIES);
+
+/**
+ * A face with room to be a face.
+ *
+ * At 24 art pixels an eye was two pixels and a pupil was one, so "give them
+ * personality" could only ever mean "give them eyes". At screen resolution an
+ * eye can have a white, an iris, a highlight and a lid, which is the difference
+ * between a dot and a look.
+ */
+function face(g, x, y, r, opts) {
+  const { aim = 0, blink = false, mouth = "smile", brow = null, gap = 0.34, eyeR = 0.2 } = opts;
+  const lx = Math.cos(aim) * eyeR * r * 0.42;
+  const ly = Math.sin(aim) * eyeR * r * 0.42;
+  for (const side of [-1, 1]) {
+    const ex = x + side * gap * r;
+    if (blink) {
+      g.beginPath();
+      g.moveTo(ex - eyeR * r * 0.9, y);
+      g.lineTo(ex + eyeR * r * 0.9, y);
+      g.lineWidth = Math.max(1.2, r * 0.07);
+      g.strokeStyle = INK;
+      g.lineCap = "round";
+      g.stroke();
+      continue;
+    }
+    stroked(g, eyeR * r, "#fffdf5", () => g.ellipse(ex, y, eyeR * r, eyeR * r * 1.08, 0, 0, Math.PI * 2));
+    g.beginPath();
+    g.arc(ex + lx, y + ly, eyeR * r * 0.52, 0, Math.PI * 2);
+    g.fillStyle = INK;
+    g.fill();
+    g.beginPath();
+    g.arc(ex + lx - eyeR * r * 0.2, y + ly - eyeR * r * 0.24, eyeR * r * 0.2, 0, Math.PI * 2);
+    g.fillStyle = "#ffffff";
+    g.fill();
+    if (brow) {
+      g.beginPath();
+      const inner = side < 0 ? 1 : -1;
+      g.moveTo(ex - eyeR * r * 0.9, y - eyeR * r * (brow === "angry" ? 1.5 : 1.9) + inner * eyeR * r * 0.3);
+      g.lineTo(ex + eyeR * r * 0.9, y - eyeR * r * (brow === "angry" ? 1.9 : 1.5) - inner * eyeR * r * 0.3);
+      g.lineWidth = Math.max(1.4, r * 0.075);
+      g.strokeStyle = INK;
+      g.lineCap = "round";
+      g.stroke();
+    }
+  }
+  const my = y + r * 0.34;
+  g.beginPath();
+  g.lineWidth = Math.max(1.4, r * 0.07);
+  g.strokeStyle = INK;
+  g.lineCap = "round";
+  if (mouth === "smile") g.arc(x, my - r * 0.1, r * 0.2, 0.25 * Math.PI, 0.75 * Math.PI);
+  else if (mouth === "grin") { g.arc(x, my - r * 0.14, r * 0.24, 0.15 * Math.PI, 0.85 * Math.PI); }
+  else if (mouth === "grimace") { g.moveTo(x - r * 0.18, my); g.lineTo(x + r * 0.18, my); }
+  else if (mouth === "o") { g.arc(x, my, r * 0.1, 0, Math.PI * 2); }
+  else { g.moveTo(x - r * 0.14, my); g.quadraticCurveTo(x, my + r * 0.08, x + r * 0.16, my - r * 0.04); }
+  g.stroke();
+}
+
+/** Per-piñata face placement and expression. */
+const FACE = {
+  candy: { fy: -0.06, mouth: "smile", gap: 0.3, eyeR: 0.19 },
+  chili: { fy: -0.2, mouth: "grimace", brow: "angry", gap: 0.24, eyeR: 0.16 },
+  gum: { fy: -0.02, mouth: "smirk", gap: 0.32, eyeR: 0.18 },
+  maraca: { fy: -0.18, mouth: "grin", gap: 0.3, eyeR: 0.18 },
+  papel: { fy: 0.06, mouth: "smile", gap: 0.3, eyeR: 0.15 },
+  firecracker: { fy: 0.05, mouth: "o", brow: "worried", gap: 0.24, eyeR: 0.16 },
+  ribbon: { fy: -0.66, mouth: "smirk", gap: 0.18, eyeR: 0.14 },
+  mariachi: { fy: 0.2, mouth: "o", gap: 0.16, eyeR: 0.12, trio: true },
+  sparkler: { fy: 0.42, mouth: "grin", gap: 0.18, eyeR: 0.13 },
+  coin: { fy: 0.08, mouth: "smirk", gap: 0.3, eyeR: 0.17 },
+};
+
+/**
+ * One piñata, complete.
+ *
+ * `y` is the GROUND the piñata stands on and `h` is how tall it should be, so a
+ * caller places it the same way it placed a sprite.
+ */
+export function drawFigure(g, type, { x, y, h, t = 0, aim = 0, blink = false, fire = 0 }) {
+  const body = BODIES[type];
+  if (!body) return;
+  const s = SKIN[type] ?? SKIN.candy;
+  // `h` is the figure's OVERALL height, and a body reaches well past its own
+  // radius: the star's points go to 1.22r and the cord to 1.17r above centre.
+  // Taking r as h/2 drew everything 1.3-1.8x too tall for the space the old
+  // sprites occupied, which crowds the board. Measured, 0.40 lands the real
+  // extent on `h`.
+  const r = h * 0.4;
+  const cy = y - r;
+  const sy = cy + (SHOULDER[type] ?? 0.2) * r;
+
+  g.save();
+  g.lineJoin = "round";
+  g.lineCap = "round";
+
+  // Contact shadow, so it sits on the ground instead of floating over it.
+  g.beginPath();
+  g.ellipse(x, y - r * 0.04, r * 0.7, r * 0.2, 0, 0, Math.PI * 2);
+  g.fillStyle = "rgba(40, 24, 16, 0.28)";
+  g.fill();
+
+  cord(g, x, cy - r * 0.75, r);
+
+  // The BACK arm goes behind the body, the front one in front of it. That one
+  // ordering is most of what makes a flat shape read as a figure with depth.
+  const back = -Math.sign(Math.cos(aim)) || 1;
+  arm(g, x + back * r * 0.3, sy, x + back * r * 0.66, sy + r * 0.34 + Math.sin(t * 2.2) * r * 0.05, r, s.lo);
+
+  body(g, x, cy, r, s);
+
+  const f = FACE[type] ?? FACE.candy;
+  if (f.trio) {
+    for (const dx of [-0.78, 0, 0.78])
+      face(g, x + dx * r, cy + f.fy * r, r * 0.5, { ...f, aim, blink });
+  } else {
+    face(g, x, cy + f.fy * r, r, { ...f, aim, blink });
+  }
+
+  // The weapon arm, out along the aim, and the thing it is holding. This is what
+  // says what the piñata DOES — everything above is who it is.
+  const [hx, hy] = grip(x, sy, r, aim, fire);
+  arm(g, x - back * r * 0.24, sy, hx, hy, r, s.lo);
+  const w = WEAPON[type];
+  if (w) w(g, hx, hy, r, s, aim, fire);
+
+  g.restore();
+}
+
+// ------------------------------------------------------------- the luchadores
+//
+// Drawn at screen resolution for the same reason the piñatas are, and for one
+// more: towers and enemies are depth-sorted into a single list, so if only the
+// towers moved to the smooth layer every enemy would draw behind every tower
+// regardless of where it stood. They move together or not at all.
+//
+// A luchador reads from three things at this size — the MASK's colour, the
+// SHAPE of the head (round, horned, hooded), and one accessory. Detail below
+// that is wasted; these are 30-60px tall and moving.
+
+const FOE_SKIN = {
+  nino: { suit: "#f2789b", mask: "#ffd45e", trim: "#ffffff" },
+  matador: { suit: "#e8524f", mask: "#2b1c63", trim: "#ffd45e" },
+  tecnico: { suit: "#5b8de8", mask: "#ffffff", trim: "#ffd45e" },
+  rudo: { suit: "#4a3866", mask: "#e8524f", trim: "#c9d6e2" },
+  plateado: { suit: "#d4dee8", mask: "#93a4b8", trim: "#ffffff" },
+  colgado: { suit: "#7cc44e", mask: "#3a8248", trim: "#e0ffd0" },
+  campeon: { suit: "#ffd45e", mask: "#d99a1c", trim: "#fff3bd" },
+  toro: { suit: "#7d5228", mask: "#3a2412", trim: "#f2e6d8" },
+  coloso: { suit: "#8f2d4e", mask: "#ffd45e", trim: "#ff9ebc" },
+  coloso2: { suit: "#b83a69", mask: "#e8524f", trim: "#ffd45e" },
+  coloso3: { suit: "#e8443c", mask: "#2b1c63", trim: "#ffd45e" },
+};
+
+/**
+ * One luchador.
+ *
+ * `squash` is the juice: a hit squashes them, a hop stretches them. It scales
+ * the figure about its feet, which is what makes a squash read as weight rather
+ * than as a wobble.
+ */
+export function drawFoe(g, type, { x, y, h, t = 0, facing = 1, squash = 1, flash = 0 }) {
+  const c = FOE_SKIN[type] ?? FOE_SKIN.nino;
+  const r = (h / 2) * squash;
+  const w = (h / 2) / squash;
+  const cy = y - r;
+
+  g.save();
+  g.lineJoin = "round";
+  g.lineCap = "round";
+
+  g.beginPath();
+  g.ellipse(x, y, w * 0.6, r * 0.16, 0, 0, Math.PI * 2);
+  g.fillStyle = "rgba(40, 24, 16, 0.28)";
+  g.fill();
+
+  const pen2 = Math.max(1.4, r * 0.11);
+  const line = (fill, path) => {
+    g.beginPath();
+    path();
+    g.fillStyle = fill;
+    g.fill();
+    g.lineWidth = pen2;
+    g.strokeStyle = INK;
+    g.stroke();
+  };
+
+  // Legs and arms first, so the body overlaps them.
+  const swing = Math.sin(t * 7) * r * 0.22;
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(x + side * w * 0.26, cy + r * 0.35);
+    g.lineTo(x + side * w * 0.3, y - r * 0.02 + side * swing * 0.5);
+    g.lineWidth = pen2 * 1.7;
+    g.strokeStyle = INK;
+    g.stroke();
+  }
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(x + side * w * 0.4, cy - r * 0.05);
+    g.lineTo(x + side * w * 0.72, cy + r * 0.3 - side * swing);
+    g.lineWidth = pen2 * 1.5;
+    g.strokeStyle = INK;
+    g.stroke();
+  }
+
+  // Torso.
+  line(c.suit, () => g.ellipse(x, cy + r * 0.18, w * 0.46, r * 0.5, 0, 0, Math.PI * 2));
+  // Belt.
+  g.beginPath();
+  g.ellipse(x, cy + r * 0.42, w * 0.42, r * 0.1, 0, 0, Math.PI * 2);
+  g.fillStyle = c.trim;
+  g.fill();
+
+  // The MASK is the read. Round for most, horned for the toro, tall for El
+  // Coloso — the boss has to be recognisable at a glance from across the board.
+  const hy = cy - r * 0.44;
+  if (type === "toro") {
+    for (const side of [-1, 1])
+      line(c.trim, () => {
+        g.moveTo(x + side * w * 0.34, hy - r * 0.1);
+        g.quadraticCurveTo(x + side * w * 0.95, hy - r * 0.6, x + side * w * 0.62, hy - r * 0.02);
+        g.quadraticCurveTo(x + side * w * 0.6, hy - r * 0.28, x + side * w * 0.34, hy - r * 0.1);
+        g.closePath();
+      });
+  }
+  line(c.mask, () => g.ellipse(x, hy, w * 0.42, r * 0.42, 0, 0, Math.PI * 2));
+  // Eye holes — two slits, which is what makes a mask a mask.
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.ellipse(x + side * w * 0.17 + facing * w * 0.04, hy - r * 0.04, w * 0.1, r * 0.11, 0, 0, Math.PI * 2);
+    g.fillStyle = "#fffdf5";
+    g.fill();
+    g.beginPath();
+    g.arc(x + side * w * 0.17 + facing * w * 0.07, hy - r * 0.03, w * 0.05, 0, Math.PI * 2);
+    g.fillStyle = INK;
+    g.fill();
+  }
+  // Mask trim down the middle.
+  g.beginPath();
+  g.moveTo(x, hy - r * 0.4);
+  g.lineTo(x, hy - r * 0.12);
+  g.lineWidth = pen2;
+  g.strokeStyle = c.trim;
+  g.stroke();
+
+  // A white flash on the frame it takes a hit. Cheap, and the single most
+  // effective piece of feedback in the whole game.
+  if (flash > 0) {
+    g.globalAlpha = Math.min(0.85, flash);
+    g.beginPath();
+    g.ellipse(x, cy + r * 0.05, w * 0.6, r * 0.75, 0, 0, Math.PI * 2);
+    g.fillStyle = "#ffffff";
+    g.fill();
+    g.globalAlpha = 1;
+  }
+  g.restore();
+}
+
+/** Every luchador this module can draw, for the coverage test. */
+export const FOE_NAMES = Object.keys(FOE_SKIN);
